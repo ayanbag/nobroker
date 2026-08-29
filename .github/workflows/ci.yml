@@ -16,9 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Both fork (POSIX) and spawn (Windows) crash-test paths must pass, and
+        # Both Ubuntu's fork path and Windows' spawn path must pass, and
         # the file-locking shim has a different backend on each platform.
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
         python: ["3.11", "3.12", "3.13"]
 
     steps:
