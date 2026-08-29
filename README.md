@@ -6,11 +6,11 @@
   <a href="https://github.com/ayanbag/nobroker/actions/workflows/ci.yml"><img alt="tests" src="https://img.shields.io/github/actions/workflow/status/ayanbag/nobroker/ci.yml?branch=main&label=tests&style=flat-square&labelColor=12160F&color=2C6A4E"></a>
   <a href="https://pypi.org/project/nobroker/"><img alt="pypi" src="https://img.shields.io/pypi/v/nobroker?style=flat-square&labelColor=12160F&color=9E3B18"></a>
   <a href="https://pypi.org/project/nobroker/"><img alt="python" src="https://img.shields.io/pypi/pyversions/nobroker?style=flat-square&labelColor=12160F&color=8A6A1F"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-535E55?style=flat-square&labelColor=12160F"></a>
+</p>
 
   <!-- <img alt="tests: 124" src="https://img.shields.io/badge/tests-124%20passing-2C6A4E?style=flat-square&labelColor=12160F"> -->
   <!-- <img alt="delivery: at-least-once" src="https://img.shields.io/badge/delivery-at--least--once-8A6A1F?style=flat-square&labelColor=12160F"> -->
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-535E55?style=flat-square&labelColor=12160F"></a>
-</p>
 
 <p align="center">
   <b>The job queue with nobody in the middle.</b><br>
