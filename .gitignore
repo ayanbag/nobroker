@@ -1,0 +1,35 @@
+# Working instructions for Claude Code -- not part of the submission.
+CLAUDE.md
+others/
+
+examples/video_demo.py
+
+# The webhook demo application used for the video. Real and working, but it is
+# scaffolding for the recording rather than part of the deliverable.
+demo/
+
+# Scratch queues created by the demo, the CLI default, and ad-hoc runs.
+.nobroker/
+*.log
+*.current
+*.lock
+!deps-proof.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling and editors
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+.nobroker/
+Thumbs.db

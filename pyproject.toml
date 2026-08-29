@@ -1,0 +1,61 @@
+[project]
+name = "nobroker"
+version = "0.1.0"
+description = "A durable, broker-less job queue for Python. No server, no dependencies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ayan", email = "ayandgp12@gmail.com" }]
+keywords = [
+    "queue", "job-queue", "task-queue", "durable", "wal", "write-ahead-log",
+    "zero-dependency", "at-least-once", "crash-safe", "worker", "background-jobs",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+# The whole point. Not "few dependencies" -- none.
+dependencies = []
+
+[project.optional-dependencies]
+# Deliberately empty too. Python ships unittest, so there is no dev extra
+# either; `make test` runs on a bare interpreter.
+
+[project.scripts]
+nobroker = "nobroker.cli:main"
+
+[project.urls]
+Homepage      = "https://github.com/ayanbag/nobroker"
+Documentation = "https://ayanbag.github.io/nobroker/"
+Playground    = "https://ayanbag.github.io/nobroker/playground.html"
+Source        = "https://github.com/ayanbag/nobroker"
+Issues        = "https://github.com/ayanbag/nobroker/issues"
+Changelog     = "https://github.com/ayanbag/nobroker/releases"
+
+[build-system]
+# setuptools is build tooling, not a runtime dependency: nothing in src/ imports
+# it, and `python -m nobroker.cli` works from a clone with no build at all.
+# Verified by `make check-deps`, which reads the imports rather than this file.
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# PEP 561: ship the marker so type checkers use our inline hints.
+nobroker = ["py.typed"]

@@ -1,0 +1,9 @@
+# Intentionally empty.
+#
+# nobroker runs on the Python standard library alone -- no runtime dependencies,
+# no test dependencies, no dev dependencies. `pip install -r requirements.txt`
+# installs nothing because there is nothing to install.
+#
+# Verified mechanically: `make check-deps` parses every import in src/, tests/,
+# tools/ and examples/ and checks each against sys.stdlib_module_names.
+# The output is committed as deps-proof.txt.

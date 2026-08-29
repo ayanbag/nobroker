@@ -1,0 +1,18 @@
+track = "D"
+name = "nobroker"
+pitch = "A durable, crash-safe job queue for Python with no broker, no server, and no dependencies -- just a file."
+
+language = "python"
+python_requires = ">=3.11"
+entrypoint = "make demo"
+runtime_dependencies = 0
+
+bonuses = ["package-killer", "stdlib-log"]
+
+# Package Killer: replaces celery + redis (or rq, dramatiq, huey) for the
+# single-machine case -- roughly 40 MB of transitive dependencies and a server
+# process, traded for one file and the standard library.
+replaces = ["celery", "redis", "rq", "dramatiq", "huey", "kombu", "billiard"]
+
+# STDLIB Log: see STDLIB.md.
+stdlib_log = "STDLIB.md"
