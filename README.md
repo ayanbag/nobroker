@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/assets/banner-git.png" alt="nobroker — the job queue with nobody in the middle" width="100%">
+  <img src="https://raw.githubusercontent.com/ayanbag/nobroker/web/master/assets/banner-git.png" alt="nobroker — the job queue with nobody in the middle" width="100%">
 </p>
 
 <p align="center">
