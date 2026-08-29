@@ -52,7 +52,7 @@ jobs:
           python tools/check_deps.py > /tmp/deps-proof.txt
           # The header line records the interpreter and platform, which differ
           # per runner; compare only the substantive part.
-          diff <(tail -n +4 deps-proof.txt) <(tail -n +4 /tmp/deps-proof.txt) \
+          diff <(tail -n +4 deps-proof.txt | tr -d '\r') <(tail -n +4 /tmp/deps-proof.txt) \
             || { echo "::error::deps-proof.txt is out of date - run 'make deps-proof'"; exit 1; }
 
   package:
