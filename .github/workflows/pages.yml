@@ -36,9 +36,9 @@ jobs:
           test -f web/index.html
           test -f web/playground.html
           test -f web/assets/logo.svg
-          # Nothing is fetched at runtime, so a stray external URL would be a
-          # broken page rather than a slow one.
-          if grep -rInE '(src|href)="https?://' web/ ; then
+          # The site must not fetch external assets at runtime. Normal outbound
+          # links (such as the GitHub button) are allowed.
+          if grep -rInE 'src="https?://' web/ ; then
             echo "::error::web/ must stay self-contained - no external assets"
             exit 1
           fi

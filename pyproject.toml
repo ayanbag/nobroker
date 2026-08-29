@@ -1,6 +1,6 @@
 [project]
 name = "nobroker"
-version = "0.1.1"
+version = "0.1.2"
 description = "A durable, broker-less job queue for Python. No server, no dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
