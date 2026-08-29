@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ayanbag/nobroker/actions/workflows/ci.yml"><img alt="tests" src="https://img.shields.io/github/actions/workflow/status/ayanbag/nobroker/ci.yml?branch=main&label=tests&style=flat-square&labelColor=12160F&color=2C6A4E"></a>
+  <a href="https://github.com/ayanbag/nobroker/actions/workflows/ci.yml"><img alt="tests" src="https://img.shields.io/github/actions/workflow/status/ayanbag/nobroker/ci.yml?branch=master&label=tests&style=flat-square&labelColor=12160F&color=2C6A4E"></a>
   <a href="https://pypi.org/project/nobroker/"><img alt="pypi" src="https://img.shields.io/pypi/v/nobroker?style=flat-square&labelColor=12160F&color=9E3B18"></a>
   <a href="https://pypi.org/project/nobroker/"><img alt="python" src="https://img.shields.io/pypi/pyversions/nobroker?style=flat-square&labelColor=12160F&color=8A6A1F"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-535E55?style=flat-square&labelColor=12160F"></a>

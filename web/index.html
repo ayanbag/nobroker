@@ -133,12 +133,14 @@ body{
 .chip{
   font-size:13px;border:1px solid var(--line);border-radius:7px;
   padding:6px 12px;background:var(--surface);color:var(--ink-2);
-  cursor:pointer;text-decoration:none;white-space:nowrap;
+  cursor:pointer;text-decoration:none;white-space:nowrap;font-family:inherit;
+  line-height:18px;display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;
 }
 .chip:hover{color:var(--ink);border-color:var(--ink-3)}
+.chip svg{display:block;flex:0 0 auto;transform:translateY(0.5px)}
 /* The theme button's label changes between two words of different width;
    a floor keeps the bar from shifting when it does. */
-#themetoggle{min-width:70px}
+#themetoggle{min-width:70px;justify-content:center}
 .chip--go{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:560}
 .chip--go:hover{background:var(--accent);border-color:var(--accent);color:#fff;opacity:.88}
 
@@ -393,6 +395,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     </nav>
     <div class="bar__end">
       <button class="chip" id="themetoggle" type="button">Dark</button>
+      <a class="chip" href="https://github.com/ayanbag/nobroker" aria-label="nobroker on GitHub">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-3.87a4.1 4.1 0 0 0-1.12-3.18c3.75-.42 7.7-1.84 7.7-8.3A6.46 6.46 0 0 0 19.87 2.1 6 6 0 0 0 19.7.5S18.3.08 15 2.1a15.5 15.5 0 0 0-6 0C5.7.08 4.3.5 4.3.5a6 6 0 0 0-.17 1.6 6.46 6.46 0 0 0-1.71 4.55c0 6.45 3.94 7.87 7.7 8.3A4.1 4.1 0 0 0 9 18.13V22"/><path d="M9 18c-3 .92-3-1.5-4.2-1.8"/></svg>
+        GitHub
+      </a>
       <a class="chip chip--go" href="./playground.html">Playground →</a>
     </div>
   </div>
