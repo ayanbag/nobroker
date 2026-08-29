@@ -1,0 +1,2 @@
+# PEP 561 marker: nobroker ships inline type hints, so type checkers should read
+# them straight from the installed package rather than looking for stubs.

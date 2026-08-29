@@ -1,0 +1,18 @@
+# What goes into the source distribution beyond the package itself.
+include LICENSE
+include README.md
+include STDLIB.md
+include deps-proof.txt
+include requirements.txt
+include .zero-dep.toml
+include Makefile
+recursive-include src/nobroker py.typed
+recursive-include tests *.py
+recursive-include tools *.py
+recursive-include examples *.py
+
+# The website and the process notes are not part of the distribution.
+prune web
+prune others
+prune dist
+exclude src/__main__.py

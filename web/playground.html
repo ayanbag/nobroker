@@ -1,0 +1,1493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nobroker playground — crash a job queue and watch it recover</title>
+<meta name="description" content="nobroker's real record format, running in your browser. Enqueue, lease, expire, crash a write mid-record, and watch recovery find the tear.">
+<link rel="icon" href="./assets/logo.svg">
+<style>
+/* ===================================================================
+   Palette.
+
+   The five job states are a STATUS set, not a categorical series, so
+   every colour ships beside a text label and never carries meaning on
+   its own. The hexes below were run through a CVD validator against
+   these exact surfaces (#ffffff / #12171f) rather than picked by eye:
+   worst adjacent pair is done-vs-dead at deltaE 9.2 light / 8.1 dark
+   under deuteranopia, which is the pair that actually matters here.
+
+   `delayed` is deliberately below the chroma floor. It is the
+   recessive state -- a job nobody can touch yet -- and it should read
+   as grey rather than compete with the four states you can act on.
+
+   The interactive accent is violet precisely because no status uses
+   it: a focus ring can never be mistaken for a job state.
+   =================================================================== */
+:root{
+  color-scheme: light;
+  --bg:#F4F6F8;
+  --surface:#FFFFFF;
+  --surface-2:#F7F9FB;
+  --surface-3:#EDF1F5;
+  --line:#DDE3EA;
+  --line-soft:#EAEFF4;
+  --ink:#0E1620;
+  --ink-2:#4A5866;
+  --ink-3:#78889A;
+
+  --accent:#6D4AE0;
+  --accent-wash:#F0ECFC;
+
+  --ready:#1F6FD6;
+  --delayed:#6B7684;
+  --leased:#B27400;
+  --done:#0E9E76;
+  --dead:#D0342E;
+  --dead-wash:#FCECEB;
+  --done-wash:#E8F7F2;
+
+  --mono:ui-monospace,"SFMono-Regular","SF Mono","Cascadia Mono","Cascadia Code",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+
+  --pad:20px;
+  --radius:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#080B10;
+    --surface:#12171F;
+    --surface-2:#171E28;
+    --surface-3:#1E2733;
+    --line:#242E3B;
+    --line-soft:#1A222D;
+    --ink:#E9EFF6;
+    --ink-2:#9BAABC;
+    --ink-3:#69788A;
+
+    --accent:#8B7BF7;
+    --accent-wash:#1D1B33;
+
+    --ready:#2E7FDE;
+    --delayed:#5F6B7C;
+    --leased:#C4870F;
+    --done:#0FA47E;
+    --dead:#E14B45;
+    --dead-wash:#2A1618;
+    --done-wash:#0D2320;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#080B10;
+  --surface:#12171F;
+  --surface-2:#171E28;
+  --surface-3:#1E2733;
+  --line:#242E3B;
+  --line-soft:#1A222D;
+  --ink:#E9EFF6;
+  --ink-2:#9BAABC;
+  --ink-3:#69788A;
+
+  --accent:#8B7BF7;
+  --accent-wash:#1D1B33;
+
+  --ready:#2E7FDE;
+  --delayed:#5F6B7C;
+  --leased:#C4870F;
+  --done:#0FA47E;
+  --dead:#E14B45;
+  --dead-wash:#2A1618;
+  --done-wash:#0D2320;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--sans);font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+button,input{font:inherit;color:inherit}
+a{color:var(--accent)}
+
+.wrap{max-width:1560px;margin:0 auto;padding:0 var(--pad) 64px}
+
+/* ---------- header ---------- */
+.bar{
+  position:sticky;top:0;z-index:30;
+  background:var(--bg);   /* fallback: a sticky bar must never be see-through */
+  background:color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter:blur(10px);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.bar__in{
+  max-width:1560px;margin:0 auto;padding:0 var(--pad);
+  height:58px;display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
+.brand img{border-radius:6px;display:block}
+.brand b{font-size:16px;font-weight:640;letter-spacing:-.02em}
+.brand i{font-style:normal;color:var(--accent)}
+.brand span{
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  border-left:1px solid var(--line);padding-left:10px;margin-left:2px;
+}
+.bar__end{display:flex;gap:8px;align-items:center}
+.ghost{
+  font-size:13px;border:1px solid var(--line);border-radius:7px;
+  padding:6px 12px;background:var(--surface);color:var(--ink-2);
+  cursor:pointer;text-decoration:none;
+}
+.ghost:hover{color:var(--ink);border-color:var(--ink-3)}
+/* The theme button's label changes between two words of different width;
+   a floor keeps the bar from shifting when it does. */
+#themetoggle{min-width:74px}
+
+/* ---------- hero ---------- */
+.hero{padding:44px 0 26px;max-width:70ch}
+.hero h1{
+  font-size:clamp(30px,4.2vw,44px);line-height:1.08;font-weight:660;
+  letter-spacing:-.033em;margin:0 0 12px;
+}
+.hero p{margin:0;font-size:17px;color:var(--ink-2)}
+.hero a{text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+.hero a:hover{border-bottom-color:var(--accent)}
+
+.recipes{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+.recipes button{
+  font-size:13px;font-weight:500;background:var(--surface);
+  border:1px solid var(--line);border-radius:99px;padding:8px 15px;
+  cursor:pointer;color:var(--ink-2);
+  transition:border-color .12s, color .12s, transform .12s;
+}
+.recipes button:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+
+/* ---------- banner ---------- */
+.banner{display:none}
+.banner.on{
+  display:flex;gap:14px;align-items:flex-start;
+  padding:14px 16px;margin-bottom:16px;
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);font-size:14px;line-height:1.5;
+}
+.banner__tag{
+  flex:0 0 auto;font-family:var(--mono);font-size:10.5px;font-weight:700;
+  letter-spacing:.08em;padding:3px 8px;border-radius:5px;margin-top:1px;
+  border:1px solid currentColor;
+}
+.banner__txt{flex:1 1 auto;min-width:0;color:var(--ink-2)}
+.banner button{
+  flex:0 0 auto;border:1px solid var(--line);background:var(--surface-2);
+  border-radius:7px;padding:6px 14px;font-size:13px;font-weight:550;cursor:pointer;
+}
+.banner button:hover{border-color:var(--ink-3)}
+.banner--ok{border-color:color-mix(in srgb,var(--done) 34%,var(--line))}
+.banner--ok .banner__tag{color:var(--done)}
+.banner--bad{border-color:color-mix(in srgb,var(--dead) 34%,var(--line));background:var(--dead-wash)}
+.banner--bad .banner__tag{color:var(--dead)}
+.banner--dead{border-color:var(--dead);background:var(--dead-wash)}
+.banner--dead .banner__tag{color:#fff;background:var(--dead);border-color:var(--dead)}
+.banner--dead .banner__txt{color:var(--ink)}
+
+/* ---------- command bar ---------- */
+.cmd{
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);margin-bottom:14px;
+}
+.cmd__compose{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:14px 16px}
+.cmd__ops{
+  display:flex;gap:10px;flex-wrap:wrap;
+  padding:12px 16px;border-top:1px solid var(--line-soft);
+}
+.cmd__foot{
+  padding:9px 16px;border-top:1px solid var(--line-soft);
+  font-size:13px;color:var(--ink-3);min-height:38px;
+  display:flex;align-items:center;
+}
+
+.grp{display:flex;flex-direction:column;gap:6px;padding-right:10px;border-right:1px solid var(--line-soft)}
+.grp:last-child{border-right:0;padding-right:0}
+.grp__hd{
+  display:flex;align-items:baseline;gap:8px;
+  font-size:10px;font-weight:640;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+}
+.grp__hd em{font-style:normal;color:var(--accent);font-family:var(--mono);letter-spacing:0;text-transform:none;font-size:11px}
+.grp__row{display:flex;gap:6px;flex-wrap:wrap}
+
+input[type="text"],input[type="number"]{
+  background:var(--surface-2);border:1px solid var(--line);border-radius:7px;
+  padding:8px 11px;font-family:var(--mono);font-size:13px;min-width:0;
+}
+input[type="text"]{flex:1 1 260px}
+input[type="number"]{width:72px;font-variant-numeric:tabular-nums}
+input:hover{border-color:var(--ink-3)}
+.field{display:flex;align-items:center;gap:6px}
+.field label{font-size:10px;font-weight:640;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+
+.btn{
+  font-size:13px;font-weight:550;padding:8px 13px;border-radius:7px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink);
+  cursor:pointer;white-space:nowrap;
+  transition:border-color .12s, background .12s, color .12s;
+}
+.btn:hover:not(:disabled){border-color:var(--ink-3);background:var(--surface-3)}
+.btn--primary{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.btn--primary:hover:not(:disabled){background:var(--ink);border-color:var(--ink);color:var(--surface);opacity:.86}
+.btn--danger{color:var(--dead);border-color:color-mix(in srgb,var(--dead) 40%,var(--line))}
+.btn--danger:hover:not(:disabled){background:var(--dead);border-color:var(--dead);color:#fff}
+.btn:disabled{opacity:.34;cursor:not-allowed}
+
+.clockread{
+  font-family:var(--mono);font-size:13px;font-weight:600;
+  color:var(--ink);font-variant-numeric:tabular-nums;
+  padding:8px 11px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2);
+}
+
+/* ---------- deck of stat tiles ---------- */
+.deck{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+  gap:10px;margin-bottom:14px;
+}
+.tile{
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);padding:13px 15px;
+}
+.tile b{
+  display:block;font-family:var(--mono);font-size:27px;font-weight:600;
+  line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+}
+.tile span{
+  display:flex;align-items:center;gap:6px;margin-top:3px;
+  font-size:11px;font-weight:560;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+}
+/* The dot carries the state hue explicitly rather than via currentColor:
+   .tile span deliberately mutes the label text, and a dot that inherited
+   that would leave the tiles distinguishable by wording alone. */
+.tile i{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.tile--ready i{background:var(--ready)}
+.tile--delayed i{background:var(--delayed)}
+.tile--leased i{background:var(--leased)}
+.tile--done i{background:var(--done)}
+.tile--dead i{background:var(--dead)}
+.tile b{color:var(--ink)}
+.tile--dead b{color:var(--dead)}
+
+/* ---------- panes ---------- */
+.panes{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);
+  gap:14px;height:clamp(460px,58vh,740px);
+}
+.pane{
+  display:flex;flex-direction:column;min-height:0;min-width:0;
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);overflow:hidden;
+}
+.pane__hd{
+  flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:12px 16px;border-bottom:1px solid var(--line-soft);background:var(--surface-2);
+}
+.pane__hd h2{
+  margin:0;font-size:11px;font-weight:660;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-2);
+}
+.pane__hd h2 code{font-family:var(--mono);font-size:11.5px;letter-spacing:0;text-transform:none;color:var(--ink-2)}
+.pane__meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.pane__body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+
+.empty{padding:40px 20px;text-align:center;color:var(--ink-3);font-size:14px;line-height:1.65}
+
+/* ---------- job rows ---------- */
+.job{
+  display:block;width:100%;text-align:left;border:0;background:none;cursor:pointer;
+  padding:12px 16px 12px 13px;border-left:3px solid transparent;
+  border-bottom:1px solid var(--line-soft);font-family:inherit;
+}
+.job:hover{background:var(--surface-2)}
+.job.sel{background:var(--accent-wash);border-left-color:var(--accent)}
+.job__top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.job__id{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.job__pay{
+  font-family:var(--mono);font-size:13.5px;color:var(--ink);margin-top:4px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.job__meta{
+  font-size:12px;color:var(--ink-3);margin-top:4px;font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pill{
+  display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;
+  font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  padding:3px 8px;border-radius:5px;border:1px solid currentColor;white-space:nowrap;
+}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.ready{color:var(--ready)} .pill.delayed{color:var(--delayed)}
+.pill.leased{color:var(--leased)} .pill.done{color:var(--done)} .pill.dead{color:var(--dead)}
+
+/* ---------- log rows ---------- */
+.lr{
+  display:grid;grid-template-columns:58px 92px minmax(0,1fr);gap:10px;align-items:baseline;
+  padding:7px 16px;border-bottom:1px solid var(--line-soft);
+  font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;
+}
+.lr__o{color:var(--ink-3);font-size:11.5px}
+.lr__t{
+  font-size:10px;font-weight:700;letter-spacing:.06em;text-align:center;
+  padding:2px 6px;border-radius:4px;border:1px solid currentColor;
+}
+.lr__b{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Nine record types folded onto the five status hues they already mean.
+   Nine separate colours would be nine things to memorise; this way the
+   colour of a record matches the colour of the state it produces. */
+.t-write{color:var(--ink-2)}
+.t-lease{color:var(--leased)}
+.t-ok{color:var(--done)}
+.t-retry{color:var(--delayed)}
+.t-dead{color:var(--dead)}
+.lr--new{animation:slidein .28s ease-out}
+@keyframes slidein{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.lr--bad{background:var(--dead-wash)}
+.lr--bad .lr__o,.lr--bad .lr__b{color:var(--dead)}
+.lr--bad .lr__t{color:var(--dead)}
+
+/* ---------- hex ---------- */
+.hex{
+  flex:0 0 auto;border-top:1px solid var(--line);background:var(--surface-2);
+  padding:12px 16px 14px;overflow-x:auto;
+}
+.hex h3{
+  margin:0 0 8px;font-size:10px;font-weight:660;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.hex__row{font-family:var(--mono);font-size:12px;line-height:1.7;white-space:nowrap}
+.hex__off{color:var(--ink-3);margin-right:12px}
+.hex__b{color:var(--ink-2)}
+.hex__b.bad{color:var(--dead);font-weight:700}
+.hex__gap{display:inline-block;width:8px}
+
+/* ---------- the honest disclosure ---------- */
+.truth{
+  margin-top:16px;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);
+}
+.truth>summary{
+  cursor:pointer;padding:16px 18px;list-style:none;
+  display:flex;align-items:center;gap:12px;
+}
+.truth>summary::-webkit-details-marker{display:none}
+.truth>summary::after{
+  content:"";margin-left:auto;flex:0 0 auto;width:8px;height:8px;
+  border-right:1.5px solid var(--ink-3);border-bottom:1.5px solid var(--ink-3);
+  transform:rotate(45deg);transition:transform .18s;
+}
+.truth[open]>summary::after{transform:rotate(-135deg)}
+.truth>summary b{font-size:15px;font-weight:600}
+.truth>summary span{font-size:14px;color:var(--ink-3)}
+.truth__in{padding:0 18px 20px}
+.truth__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.truth__col{border:1px solid var(--line);border-radius:9px;padding:16px 18px;background:var(--surface-2)}
+.truth__col h3{margin:0 0 12px;font-size:13px;font-weight:640;display:flex;align-items:center;gap:8px}
+.truth__col--real h3{color:var(--done)}
+.truth__col--sim h3{color:var(--leased)}
+.truth__col h3 i{width:8px;height:8px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.truth__col ul{margin:0;padding-left:1.15em;font-size:14px;color:var(--ink-2)}
+.truth__col li{margin-bottom:8px}
+.truth__col li b{color:var(--ink);font-weight:600}
+.truth__note{
+  margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line);
+  font-size:13.5px;color:var(--ink-2);
+}
+.truth__note b{color:var(--done)}
+.truth code{
+  font-family:var(--mono);font-size:.87em;background:var(--surface-3);
+  padding:.08em .34em;border-radius:4px;
+}
+.truth__foot{margin:16px 0 0;font-size:14px;color:var(--ink-3);max-width:78ch}
+
+/* The guide. Shares the disclosure mechanics with .truth -- same summary row,
+   same chevron -- so the two collapsibles read as one component. */
+.guide{margin:16px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.guide>summary{cursor:pointer;padding:16px 18px;list-style:none;display:flex;align-items:center;gap:12px}
+.guide>summary::-webkit-details-marker{display:none}
+.guide>summary::after{
+  content:"";margin-left:auto;flex:0 0 auto;width:8px;height:8px;
+  border-right:1.5px solid var(--ink-3);border-bottom:1.5px solid var(--ink-3);
+  transform:rotate(45deg);transition:transform .18s;
+}
+.guide[open]>summary::after{transform:rotate(-135deg)}
+.guide>summary b{font-size:15px;font-weight:600}
+.guide>summary span{font-size:14px;color:var(--ink-3)}
+.guide__in{padding:0 18px 20px;font-size:14px;color:var(--ink-2);max-width:88ch}
+.guide__in h3{margin:18px 0 8px;font-size:13px;font-weight:640;color:var(--ink)}
+.guide__in h3:first-child{margin-top:0}
+.guide__in p{margin:0 0 10px}
+.guide code{font-family:var(--mono);font-size:.87em;background:var(--surface-3);padding:.08em .34em;border-radius:4px}
+.guide b{color:var(--ink);font-weight:600}
+/* A button name in running text, so "click Lease" is unambiguous. */
+.key{
+  font-family:var(--mono);font-size:.85em;border:1px solid var(--line);
+  background:var(--surface-2);border-radius:5px;padding:.1em .4em;color:var(--ink);
+  white-space:nowrap;
+}
+.guide__steps{margin:0;padding:0;list-style:none;counter-reset:step}
+.guide__steps>li{
+  counter-increment:step;position:relative;padding:0 0 14px 34px;margin:0;
+  border-left:1px solid var(--line);margin-left:11px;
+}
+.guide__steps>li:last-child{border-left-color:transparent;padding-bottom:0}
+.guide__steps>li::before{
+  content:counter(step);position:absolute;left:-11px;top:0;width:22px;height:22px;
+  border-radius:50%;background:var(--surface-3);border:1px solid var(--line);
+  color:var(--ink);font-size:12px;font-weight:640;display:grid;place-items:center;
+}
+.guide__steps b{display:block;margin-bottom:2px}
+.guide__look{color:var(--done)}
+.guide__words{
+  margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:2px 20px;
+}
+.guide__words div{padding:6px 0;border-bottom:1px solid var(--line)}
+.guide__words dt{font-weight:640;color:var(--ink)}
+.guide__words dd{margin:2px 0 0}
+.guide__tip{margin-top:14px}
+
+.pagefoot{margin-top:26px;font-size:13px;color:var(--ink-3)}
+
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+@media (max-width:1040px){
+  .panes{grid-template-columns:1fr;height:auto}
+  .pane__body{max-height:360px}
+  .grp{border-right:0;padding-right:0}
+  .cmd__ops{gap:16px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar__in">
+    <a class="brand" href="./index.html">
+      <img src="./assets/logo.svg" width="26" height="26" alt="" aria-hidden="true">
+      <b>nobroker<i>/</i></b><span>playground</span>
+    </a>
+    <div class="bar__end">
+      <button class="ghost" id="themetoggle" type="button">Dark</button>
+      <a class="ghost" href="./index.html">Docs →</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section class="hero">
+    <h1>Break it on purpose.</h1>
+    <p>nobroker's real record format, reimplemented in JavaScript — same frame, real CRC-32,
+    real byte offsets. Crash a write mid-record and watch recovery find the tear.
+    <a href="#truth">What's real and what's simulated →</a></p>
+    <div class="recipes">
+      <button type="button" data-recipe="crash">Crash and recover</button>
+      <button type="button" data-recipe="expire">Let a lease expire</button>
+      <button type="button" data-recipe="fence">Ack a lease you already lost</button>
+      <button type="button" data-recipe="dlq">Drive a job into the DLQ</button>
+      <button type="button" data-recipe="compact">Fill the log, then compact</button>
+    </div>
+  </section>
+
+  <details class="guide" id="guide" open>
+    <summary>
+      <b>New here? Start with this.</b>
+      <span>What the two panels are, and a five-minute tour.</span>
+    </summary>
+    <div class="guide__in">
+
+      <h3>What you are looking at</h3>
+      <p>A job queue is a to-do list that survives its program being killed. Work
+      is written down first, then done later by something else — so a crash
+      loses nothing that was already promised.</p>
+      <p>Everything on this page is that list, shown twice:</p>
+      <p><b>Jobs</b> is what the queue <em>believes</em> — one card per job, with
+      its state. <b>The log file</b> is what is actually <em>on disk</em>, record
+      by record, with real byte offsets. The second one is the truth: the Jobs
+      panel is rebuilt from it every time you press <span class="key">Recover</span>.
+      Keep an eye on both, because the whole design is that they can never
+      disagree after a crash.</p>
+      <p>Nothing here is sent anywhere. It runs entirely in this tab, and
+      reloading starts over.</p>
+
+      <h3>A five-minute tour</h3>
+      <ol class="guide__steps">
+        <li>
+          <b>Put work on the list</b>
+          Press <span class="key">Enqueue</span>. A card appears under Jobs, and
+          one <code>ENQUEUE</code> record appears in the log.
+          <span class="guide__look">Look at the byte offsets — that record is
+          now on the disk, and the real thing would not have returned until it
+          was.</span>
+        </li>
+        <li>
+          <b>Take the work, but do not remove it</b>
+          Press <span class="key">Lease</span>. The job goes <em>leased</em>: hidden
+          from everyone else for 30 seconds, but still on the list.
+          <span class="guide__look">This is the whole trick. If it were removed
+          and the worker died, the job would be gone forever.</span>
+        </li>
+        <li>
+          <b>Kill the worker without saying so</b>
+          Instead of <span class="key">Ack</span>, press <span class="key">+35s</span>
+          to run the clock past the 30-second deadline.
+          <span class="guide__look">The job comes back by itself. Nothing had to
+          notice the worker died — the deadline is just a timestamp that passed.</span>
+        </li>
+        <li>
+          <b>Break the disk mid-write</b>
+          Press <span class="key">Crash mid-write</span>, then read the last line
+          of the log: half a record, cut off exactly where the write stopped.
+          Now press <span class="key">Recover</span>.
+          <span class="guide__look">The torn piece is detected and thrown away,
+          and every complete record before it survives. That is the entire
+          crash-safety story in two clicks.</span>
+        </li>
+        <li>
+          <b>Corrupt a byte that is already written</b>
+          Press <span class="key">Flip a bit</span>, then <span class="key">Recover</span>.
+          <span class="guide__look">The record is still the right <em>length</em>,
+          so only the checksum can catch it — and it does. Without that, the
+          queue would happily act on damaged data.</span>
+        </li>
+      </ol>
+      <p class="guide__tip">The five buttons at the top of the page do these
+      sequences for you if you would rather watch than click.
+      <b>Hover any button</b> for a one-line explanation of what it does.</p>
+
+      <h3>The words on the buttons</h3>
+      <dl class="guide__words">
+        <div><dt>Enqueue</dt><dd>Add a job to the list.</dd></div>
+        <div><dt>Lease</dt><dd>Claim a job for 30 seconds without removing it.</dd></div>
+        <div><dt>Ack</dt><dd>"Done" — now it can leave the list.</dd></div>
+        <div><dt>Nack</dt><dd>"That failed" — put it back, after a wait.</dd></div>
+        <div><dt>Extend</dt><dd>"Still working on it" — push the deadline out.</dd></div>
+        <div><dt>Backoff</dt><dd>Waiting longer before each retry: 1s, 2s, 4s. Stops a
+          failing job hammering something already broken.</dd></div>
+        <div><dt>DLQ</dt><dd>Dead-letter queue: where a job goes after failing too many
+          times, so a person can look at it instead of it retrying forever.</dd></div>
+        <div><dt>Compact</dt><dd>Rewrite the log with only the jobs that still matter.
+          Finished ones are dropped; failed ones are kept.</dd></div>
+        <div><dt>CRC-32</dt><dd>A number computed from a record's bytes. If any bit
+          changes, it stops matching — which is how corruption is caught.</dd></div>
+        <div><dt>fsync</dt><dd>Forcing bytes out of memory and onto the physical disk.
+          The one thing this page cannot do; see below.</dd></div>
+      </dl>
+
+    </div>
+  </details>
+
+  <div class="banner" id="banner"></div>
+
+  <section class="cmd" aria-label="Controls">
+    <div class="cmd__compose">
+      <input type="text" id="payload" value='{"to":"ada@example.com"}' aria-label="Payload JSON"
+             data-hint="Any JSON. Invalid JSON is stored as plain text, exactly as the CLI does it.">
+      <div class="field"><label for="priority">Prio</label><input type="number" id="priority" value="0"></div>
+      <div class="field"><label for="delay">Delay</label><input type="number" id="delay" value="0" min="0"></div>
+      <div class="field"><label for="maxatt">Tries</label><input type="number" id="maxatt" value="3" min="1"></div>
+      <button class="btn btn--primary" id="b-enqueue" type="button"
+              data-hint="Appends one ENQUEUE record and fsyncs before returning. If the call returned, the job is on disk.">Enqueue</button>
+      <button class="btn" id="b-enqueue5" type="button"
+              data-hint="Five separate writes. The real enqueue_many would make that one write and one fsync.">×5</button>
+    </div>
+
+    <div class="cmd__ops">
+      <div class="grp">
+        <div class="grp__hd">Consume <em id="selname"></em></div>
+        <div class="grp__row">
+          <button class="btn" id="b-lease" type="button"
+                  data-hint="Takes the highest-priority eligible job and hides it from everyone else for 30s.">Lease</button>
+          <button class="btn" id="b-lease3" type="button" data-hint="Lease three jobs at once.">Lease ×3</button>
+          <button class="btn" id="b-ack" type="button"
+                  data-hint="Marks the selected job done. Acking twice is not an error — at-least-once means handlers must be idempotent.">Ack</button>
+          <button class="btn" id="b-nack" type="button"
+                  data-hint="Fails the job on purpose. It comes back after exponential backoff, or dies if it's out of attempts.">Nack</button>
+          <button class="btn" id="b-extend" type="button"
+                  data-hint="Pushes the lease deadline out 30s — what a worker heartbeat does for a slow handler.">Extend</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="grp__hd">Clock</div>
+        <div class="grp__row">
+          <span class="clockread" id="clockread">t+0s</span>
+          <button class="btn" id="b-t5" type="button" data-hint="Advance the virtual clock 5 seconds.">+5s</button>
+          <button class="btn" id="b-t35" type="button"
+                  data-hint="Past the 30s visibility timeout: any live lease expires and its job is reclaimed with backoff.">+35s</button>
+          <button class="btn" id="b-t300" type="button" data-hint="Five minutes. Long enough to clear most backoff windows.">+5m</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="grp__hd">Failure</div>
+        <div class="grp__row">
+          <button class="btn btn--danger" id="b-crash" type="button"
+                  data-hint="Interrupts an enqueue partway through its record. Half a record reaches the disk and the in-memory index dies with the process.">Crash mid-write</button>
+          <button class="btn btn--danger" id="b-flip" type="button"
+                  data-hint="Corrupts one byte already written. The length prefix still looks right — only the checksum can catch this.">Flip a bit</button>
+          <button class="btn btn--primary" id="b-recover" type="button"
+                  data-hint="Re-scan from byte 16, replay every record that checksums, truncate at the first one that doesn't.">Recover</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="grp__hd">Maintain</div>
+        <div class="grp__row">
+          <button class="btn" id="b-compact" type="button"
+                  data-hint="Rewrites the log with only live jobs, into a new generation. Dead-letter jobs are kept — they are the record of what failed.">Compact</button>
+          <button class="btn" id="b-requeue" type="button" data-hint="Revives every dead-letter job with attempts reset to zero.">Requeue DLQ</button>
+          <button class="btn" id="b-purge" type="button" data-hint="One PURGE record, as durable as any other write.">Purge</button>
+          <button class="btn" id="b-reset" type="button" data-hint="Throw the disk away and start over with the seed jobs.">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cmd__foot" id="hintline"></div>
+  </section>
+
+  <section class="deck" id="deck" aria-label="Queue state"></section>
+
+  <div class="panes">
+    <section class="pane">
+      <div class="pane__hd">
+        <h2>Jobs</h2>
+        <span class="pane__meta" id="jobcount">0 jobs</span>
+      </div>
+      <div class="pane__body" id="jobs"></div>
+    </section>
+
+    <section class="pane">
+      <div class="pane__hd">
+        <h2><code id="logname">jobs/default.000000.log</code></h2>
+        <span class="pane__meta" id="logsize">16 B</span>
+      </div>
+      <div class="pane__body" id="log"></div>
+      <div class="hex" id="hex"></div>
+    </section>
+  </div>
+
+  <details class="truth" id="truth">
+    <summary>
+      <b>What's real here, and what isn't</b>
+      <span>A reimplementation, not Python in your browser.</span>
+    </summary>
+    <div class="truth__in">
+      <div class="truth__grid">
+        <div class="truth__col truth__col--real">
+          <h3><i></i>Real — byte-for-byte the same as Python</h3>
+          <ul>
+            <li>The <b>record frame</b>: <code>[u32 length][u8 type][u32 crc32][json]</code>, little-endian, plus the 16-byte file header.</li>
+            <li>The <b>CRC-32</b>, same polynomial as <code>zlib.crc32</code>, over the type byte plus the payload.</li>
+            <li>The <b>JSON encoder</b>: sorted keys, no whitespace, non-ASCII escaped as <code>\uXXXX</code> the way <code>ensure_ascii</code> does it.</li>
+            <li>The <b>byte offsets</b> in the log are real positions in a real byte array.</li>
+            <li>The <b>recovery algorithm</b>: scan forward, stop at the first record that fails its length or checksum, truncate there.</li>
+            <li>The <b>state machine</b> and all nine record types, including the rule that replay never reads a clock.</li>
+          </ul>
+          <p class="truth__note"><b>Verified, not asserted.</b> The encoder was diffed against
+          <code>nobroker.codec</code> across file headers and every record type — identical hex
+          output, including a payload with non-ASCII characters.</p>
+        </div>
+        <div class="truth__col truth__col--sim">
+          <h3><i></i>Simulated — different from the real thing</h3>
+          <ul>
+            <li>The <b>"disk" is a JavaScript array</b>. There is no file, and nothing survives a reload.</li>
+            <li><b>No <code>fsync</code></b> — durability is the one guarantee a browser cannot demonstrate.</li>
+            <li>The <b>clock is a variable</b> you advance by hand, so a 30-second lease expires on a button press.</li>
+            <li>The <b>heaps are sorted arrays</b>. The real thing uses two <code>heapq</code> heaps with lazy deletion; here <em>n</em> is tiny and the trick would only obscure the point.</li>
+            <li><b>No file lock</b> — one tab, one thread. Multi-process safety is the part you take on trust, or read the tests for.</li>
+            <li>Python writes integral floats as <code>30.0</code> where JavaScript writes <code>30</code>. The virtual clock is whole seconds so it never comes up here, but a log written by Python would differ in those bytes.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="truth__foot">The playground exists to make the <em>failure modes</em> tangible — a torn
+      tail, a stale fencing token, a lease that expired while you weren't looking. For the durability
+      guarantee itself, the evidence is the test suite: <a href="./index.html#/design">design notes</a>.</p>
+    </div>
+  </details>
+
+  <p class="pagefoot">Nothing here talks to a server. Reload to start over.</p>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =====================================================================
+   A faithful JavaScript port of nobroker's on-disk format and state
+   machine. The framing is byte-identical to the Python implementation:
+
+       file header:  <8s magic><u16 version><u32 generation><u16 reserved>
+       record:       <u32 length><u8 type><u32 crc32><json payload>
+
+   Two deliberate simplifications, stated rather than hidden:
+     - the ready and delayed heaps are plain arrays that get sorted,
+       because n here is tiny and heapq's lazy-deletion trick would
+       obscure the thing being demonstrated;
+     - the clock is a variable you advance by hand instead of wall time.
+   Everything else -- the CRC, the offsets, the replay, the torn-tail
+   truncation -- is the real algorithm.
+   ===================================================================== */
+
+var TYPE = {ENQUEUE:1,LEASE:2,ACK:3,NACK:4,RECLAIM:5,DEAD:6,REQUEUE:7,PURGE:8,EXTEND:9};
+var TYPE_NAME = {1:"ENQUEUE",2:"LEASE",3:"ACK",4:"NACK",5:"RECLAIM",6:"DEAD",7:"REQUEUE",8:"PURGE",9:"EXTEND"};
+
+/* Which status hue each record type borrows. See the note in the CSS:
+   the colour of a record matches the colour of the state it produces. */
+var TYPE_CLASS = {
+  1:"t-write", 7:"t-write", 8:"t-write",
+  2:"t-lease", 9:"t-lease",
+  3:"t-ok",
+  4:"t-retry", 5:"t-retry",
+  6:"t-dead"
+};
+
+var HEADER_SIZE = 16, REC_HEADER = 9;
+var VISIBILITY = 30;
+var BACKOFF = {base:5, factor:2, max:300};   /* jitter 0 so the demo is legible */
+
+/* ---------- crc32, table-driven, same polynomial as zlib ---------- */
+var CRC_TABLE = (function(){
+  var t = new Uint32Array(256), c, n, k;
+  for (n = 0; n < 256; n++){
+    c = n;
+    for (k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes){
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/* ---------- stable JSON, matching Python's json.dumps ----------
+   Python encodes with sort_keys=True and separators=(",",":"), and -- the part
+   that is easy to miss -- ensure_ascii=True, which escapes every non-ASCII
+   character as \uXXXX. JSON.stringify emits raw UTF-8 instead, so a payload
+   containing "é" would produce different bytes and therefore a different CRC.
+   jstr() below does the escaping Python does, which is what lets the encoder be
+   byte-identical rather than merely equivalent. */
+function jstr(s){
+  var out = '"', i, ch, code;
+  for (i = 0; i < s.length; i++){
+    ch = s.charAt(i);
+    code = s.charCodeAt(i);
+    if (ch === '"') out += '\\"';
+    else if (ch === "\\") out += "\\\\";
+    else if (ch === "\n") out += "\\n";
+    else if (ch === "\r") out += "\\r";
+    else if (ch === "\t") out += "\\t";
+    else if (ch === "\b") out += "\\b";
+    else if (ch === "\f") out += "\\f";
+    else if (code < 0x20 || code >= 0x7f) out += "\\u" + code.toString(16).padStart(4, "0");
+    else out += ch;
+  }
+  return out + '"';
+}
+
+function stable(v){
+  if (typeof v === "string") return jstr(v);
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+  var keys = Object.keys(v).sort(), out = [], i;
+  for (i = 0; i < keys.length; i++){
+    if (v[keys[i]] === undefined) continue;
+    out.push(jstr(keys[i]) + ":" + stable(v[keys[i]]));
+  }
+  return "{" + out.join(",") + "}";
+}
+
+var ENC = new TextEncoder(), DEC = new TextDecoder();
+function u32(n){ return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]; }
+function readU32(b, i){ return (b[i] | (b[i+1] << 8) | (b[i+2] << 16) | (b[i+3] << 24)) >>> 0; }
+
+function fileHeader(generation){
+  var out = [], magic = "NOBROKER", i;
+  for (i = 0; i < 8; i++) out.push(magic.charCodeAt(i));
+  out.push(1, 0);
+  out = out.concat(u32(generation));
+  out.push(0, 0);
+  return out;
+}
+
+function encodeRecord(type, payload){
+  var body = Array.prototype.slice.call(ENC.encode(stable(payload)));
+  var crc = crc32([type].concat(body));
+  return u32(body.length).concat([type], u32(crc), body);
+}
+
+/* Returns {records, validEnd, damage}. Mirrors LogFile.scan exactly. */
+function scan(bytes, start){
+  var records = [], cursor = start, damage = "none";
+  while (true){
+    if (cursor + REC_HEADER > bytes.length){
+      if (cursor !== bytes.length) damage = "truncated record header";
+      break;
+    }
+    var length = readU32(bytes, cursor);
+    var type = bytes[cursor + 4];
+    var crc = readU32(bytes, cursor + 5);
+    var bodyAt = cursor + REC_HEADER, bodyEnd = bodyAt + length;
+    if (length > 8 * 1024 * 1024){ damage = "record length exceeds maximum"; break; }
+    if (bodyEnd > bytes.length){ damage = "truncated record body"; break; }
+    var body = bytes.slice(bodyAt, bodyEnd);
+    if (crc32([type].concat(body)) !== crc){ damage = "checksum mismatch"; break; }
+    if (!TYPE_NAME[type]){ damage = "unknown record type"; break; }
+    var payload;
+    try { payload = JSON.parse(DEC.decode(new Uint8Array(body))); }
+    catch (e){ damage = "checksum mismatch"; break; }
+    records.push({offset:cursor, type:type, payload:payload});
+    cursor = bodyEnd;
+  }
+  return {records:records, validEnd:cursor, damage:damage};
+}
+
+/* ===================== state ===================== */
+
+var S = null;
+var lastRecordCount = 0;
+
+function fresh(){
+  return {
+    bytes: fileHeader(0),
+    jobs: {}, order: [],
+    now: 0, seq: 0, counter: 0, generation: 0,
+    dead: false, selected: null, recovery: null
+  };
+}
+
+function backoffFor(attempts){
+  if (attempts <= 0) return 0;
+  return Math.round(Math.min(BACKOFF.base * Math.pow(BACKOFF.factor, attempts - 1), BACKOFF.max));
+}
+
+/* Apply one record. Pure: never reads the clock, never rolls a die --
+   exactly like Index.apply in the Python. */
+function apply(rec){
+  var p = rec.payload, job;
+  switch (rec.type){
+    case TYPE.ENQUEUE:
+      job = {
+        id:p.id, payload:p.payload, priority:p.priority, state:p.state,
+        attempts:p.attempts, max_attempts:p.max_attempts,
+        available_at:p.available_at, enqueued_at:p.enqueued_at,
+        lease_deadline:p.lease_deadline, lease_token:p.lease_token,
+        last_error:p.last_error, seq:p.seq
+      };
+      if (!S.jobs[job.id]) S.order.push(job.id);
+      S.jobs[job.id] = job;
+      if (job.seq > S.seq) S.seq = job.seq;
+      break;
+    case TYPE.LEASE:
+      job = S.jobs[p.id]; if (!job) break;
+      job.state = "leased"; job.attempts = p.attempts;
+      job.lease_deadline = p.deadline; job.lease_token = p.token;
+      break;
+    case TYPE.EXTEND:
+      job = S.jobs[p.id]; if (!job || job.state !== "leased") break;
+      job.lease_deadline = p.deadline;
+      break;
+    case TYPE.ACK:
+      job = S.jobs[p.id]; if (!job) break;
+      job.state = "done"; job.lease_deadline = null; job.lease_token = null;
+      break;
+    case TYPE.NACK:
+      job = S.jobs[p.id]; if (!job) break;
+      job.state = "ready"; job.attempts = p.attempts;
+      job.available_at = p.available_at; job.last_error = p.error;
+      job.lease_deadline = null; job.lease_token = null;
+      break;
+    case TYPE.RECLAIM:
+      job = S.jobs[p.id]; if (!job) break;
+      job.state = "ready"; job.available_at = p.available_at;
+      job.lease_deadline = null; job.lease_token = null;
+      job.last_error = p.error || job.last_error;
+      break;
+    case TYPE.DEAD:
+      job = S.jobs[p.id]; if (!job) break;
+      job.state = "dead"; job.lease_deadline = null; job.lease_token = null;
+      if (p.error) job.last_error = p.error;
+      break;
+    case TYPE.REQUEUE:
+      job = S.jobs[p.id]; if (!job) break;
+      job.state = "ready"; job.attempts = 0; job.available_at = p.available_at;
+      job.lease_deadline = null; job.lease_token = null; job.last_error = null;
+      break;
+    case TYPE.PURGE:
+      S.jobs = {}; S.order = []; S.selected = null;
+      break;
+  }
+}
+
+/* Disk before memory: append and "fsync", then apply. */
+function commit(records){
+  for (var i = 0; i < records.length; i++){
+    var bytes = encodeRecord(records[i][0], records[i][1]);
+    for (var j = 0; j < bytes.length; j++) S.bytes.push(bytes[j]);
+    apply({offset:0, type:records[i][0], payload:records[i][1]});
+  }
+}
+
+function replay(){
+  var result = scan(S.bytes, HEADER_SIZE);
+  S.jobs = {}; S.order = []; S.seq = 0;
+  for (var i = 0; i < result.records.length; i++) apply(result.records[i]);
+  var discarded = 0;
+  if (result.damage !== "none"){
+    discarded = S.bytes.length - result.validEnd;
+    S.bytes = S.bytes.slice(0, result.validEnd);   /* the durable repair */
+  }
+  S.recovery = {applied:result.records.length, discarded:discarded, damage:result.damage};
+}
+
+/* Reap expired leases: same treatment as a nack, backoff included. */
+function reap(){
+  var records = [], i, id, job;
+  for (i = 0; i < S.order.length; i++){
+    id = S.order[i]; job = S.jobs[id];
+    if (!job || job.state !== "leased" || job.lease_deadline > S.now) continue;
+    if (job.attempts >= job.max_attempts){
+      records.push([TYPE.DEAD, {id:id, at:S.now, error:"lease expired after " + VISIBILITY + "s"}]);
+    } else {
+      records.push([TYPE.RECLAIM, {
+        id:id, at:S.now, available_at:S.now + backoffFor(job.attempts),
+        error:"lease expired after " + VISIBILITY + "s"
+      }]);
+    }
+  }
+  if (records.length) commit(records);
+  return records.length;
+}
+
+function guard(){
+  if (S.dead){ note("bad", "The process is dead. Recover before doing anything else."); return false; }
+  reap();
+  return true;
+}
+
+function eligible(){
+  var out = [], i, job;
+  for (i = 0; i < S.order.length; i++){
+    job = S.jobs[S.order[i]];
+    if (job && job.state === "ready" && job.available_at <= S.now) out.push(job);
+  }
+  out.sort(function(a,b){
+    return (b.priority - a.priority) || (a.available_at - b.available_at) || (a.seq - b.seq);
+  });
+  return out;
+}
+
+/* ===================== operations ===================== */
+
+function enqueue(payload, priority, delay, maxAttempts){
+  if (!guard()) return null;
+  S.counter++;
+  var id = "job-" + String(S.counter).padStart(4, "0");
+  S.seq++;
+  commit([[TYPE.ENQUEUE, {
+    id:id, payload:payload, priority:priority, state:"ready",
+    attempts:0, max_attempts:maxAttempts,
+    available_at:S.now + delay, enqueued_at:S.now,
+    lease_deadline:null, lease_token:null, last_error:null, seq:S.seq
+  }]]);
+  return id;
+}
+
+function lease(count){
+  if (!guard()) return 0;
+  var take = eligible().slice(0, count), records = [], i;
+  for (i = 0; i < take.length; i++){
+    records.push([TYPE.LEASE, {
+      id:take[i].id, at:S.now, deadline:S.now + VISIBILITY,
+      attempts:take[i].attempts + 1,
+      token:"tok-" + Math.random().toString(16).slice(2, 8)
+    }]);
+  }
+  if (!records.length){ note("bad", "Nothing eligible to lease right now."); return 0; }
+  commit(records);
+  S.selected = take[0].id;
+  note("ok", "Leased " + records.length + " job" + (records.length === 1 ? "" : "s") +
+    ", invisible to everyone else for " + VISIBILITY + "s.");
+  return records.length;
+}
+
+function ack(id){
+  if (!guard()) return;
+  var job = S.jobs[id];
+  if (!job) return note("bad", "No such job.");
+  if (job.state === "done") return note("ok", "Already acked — acking twice is not an error.");
+  if (job.state !== "leased"){
+    return note("bad", "Refused: " + id + " is " + job.state + ", not leased. Its lease expired and it was reclaimed — your fencing token is stale.");
+  }
+  commit([[TYPE.ACK, {id:id, at:S.now}]]);
+  note("ok", "Acked " + id + ". Compaction will drop it.");
+}
+
+function nack(id, reason){
+  if (!guard()) return;
+  var job = S.jobs[id];
+  if (!job) return note("bad", "No such job.");
+  if (job.state !== "leased") return note("bad", "Refused: " + id + " is " + job.state + ", not leased.");
+  if (job.attempts >= job.max_attempts){
+    commit([[TYPE.DEAD, {id:id, at:S.now, error:reason}]]);
+    note("bad", id + " exhausted " + job.max_attempts + " attempts and moved to the dead-letter queue.");
+  } else {
+    var wait = backoffFor(job.attempts);
+    commit([[TYPE.NACK, {id:id, at:S.now, attempts:job.attempts, available_at:S.now + wait, error:reason}]]);
+    note("ok", "Nacked " + id + " — retry in " + wait + "s (attempt " + job.attempts + " of " + job.max_attempts + ").");
+  }
+}
+
+function extend(id){
+  if (!guard()) return;
+  var job = S.jobs[id];
+  if (!job || job.state !== "leased") return note("bad", "Only a leased job can be extended.");
+  commit([[TYPE.EXTEND, {id:id, at:S.now, deadline:Math.max(job.lease_deadline, S.now) + VISIBILITY}]]);
+  note("ok", "Lease on " + id + " extended by " + VISIBILITY + "s — what the worker heartbeat does for a slow handler.");
+}
+
+function advance(seconds){
+  if (S.dead) return note("bad", "The process is dead. Recover first.");
+  S.now += seconds;
+  var n = reap();
+  note("ok", n ? ("Clock +" + seconds + "s — " + n + " expired lease" + (n === 1 ? "" : "s") + " reclaimed.")
+               : ("Clock +" + seconds + "s. Nothing expired."));
+}
+
+/* The interesting button. Half a record reaches the disk, then the
+   process is gone -- no unwinding, no flush, no cleanup. */
+function crash(){
+  if (S.dead) return note("bad", "Already dead. Recover first.");
+  S.counter++;
+  var record = encodeRecord(TYPE.ENQUEUE, {
+    id:"job-" + String(S.counter).padStart(4,"0"),
+    payload:{to:"never-made-it@example.com"}, priority:0, state:"ready",
+    attempts:0, max_attempts:3, available_at:S.now, enqueued_at:S.now,
+    lease_deadline:null, lease_token:null, last_error:null, seq:S.seq + 1
+  });
+  var partial = Math.max(4, Math.floor(record.length * (0.25 + Math.random() * 0.4)));
+  for (var i = 0; i < partial; i++) S.bytes.push(record[i]);
+  die("Process killed mid-write. " + partial + " of " + record.length +
+      " bytes of the last record reached the disk, and the in-memory index went with the process.");
+}
+
+function flipBit(){
+  if (S.dead) return note("bad", "The process is dead. Recover first.");
+  if (S.bytes.length <= HEADER_SIZE + REC_HEADER) return note("bad", "Nothing on disk to corrupt yet.");
+  var at = HEADER_SIZE + Math.floor(Math.random() * (S.bytes.length - HEADER_SIZE));
+  S.bytes[at] = S.bytes[at] ^ 0xFF;
+  die("Byte " + at + " corrupted on disk. The length prefix still says the record is complete — " +
+      "only the checksum knows, and nothing has noticed yet.");
+}
+
+function die(text){
+  S.dead = true;
+  S.jobs = {}; S.order = []; S.selected = null;
+  banner("dead", "CRASHED", text, "Recover", recover);
+}
+
+function recover(){
+  replay();
+  S.dead = false;
+  var r = S.recovery;
+  if (r.discarded > 0){
+    banner("ok", "RECOVERED", "Repaired: " + r.applied + " records replayed, " + r.discarded +
+      " bytes discarded from the tail (" + r.damage + "). Every acked job is intact.", "Dismiss", clearBanner);
+  } else {
+    banner("ok", "RECOVERED", "Clean: " + r.applied + " records replayed, nothing to repair.", "Dismiss", clearBanner);
+  }
+  render();
+}
+
+function compact(){
+  if (!guard()) return;
+  var before = S.bytes.length, kept = [], dropped = 0, i, job;
+  for (i = 0; i < S.order.length; i++){
+    job = S.jobs[S.order[i]];
+    if (!job) continue;
+    if (job.state === "done") dropped++; else kept.push(job);
+  }
+  S.generation++;
+  S.bytes = fileHeader(S.generation);
+  for (i = 0; i < kept.length; i++){
+    var rec = encodeRecord(TYPE.ENQUEUE, kept[i]);
+    for (var m = 0; m < rec.length; m++) S.bytes.push(rec[m]);
+  }
+  S.order = kept.map(function(j){ return j.id; });
+  S.jobs = {};
+  for (i = 0; i < kept.length; i++) S.jobs[kept[i].id] = kept[i];
+  if (S.selected && !S.jobs[S.selected]) S.selected = null;   /* it was dropped */
+  note("ok", "Compacted " + before + " → " + S.bytes.length + " bytes into generation " +
+    S.generation + ". Kept " + kept.length + " live, dropped " + dropped +
+    " completed. Dead-letter jobs are kept — they are a record of what failed.");
+}
+
+function requeueDead(){
+  if (!guard()) return;
+  var records = [], i, job;
+  for (i = 0; i < S.order.length; i++){
+    job = S.jobs[S.order[i]];
+    if (job && job.state === "dead") records.push([TYPE.REQUEUE, {id:job.id, at:S.now, available_at:S.now}]);
+  }
+  if (!records.length) return note("bad", "The dead-letter queue is empty.");
+  commit(records);
+  note("ok", "Revived " + records.length + " job" + (records.length === 1 ? "" : "s") + " from the DLQ, attempts reset to zero.");
+}
+
+function purge(){
+  if (!guard()) return;
+  var n = S.order.length;
+  commit([[TYPE.PURGE, {at:S.now}]]);
+  note("ok", "Purged " + n + " job" + (n === 1 ? "" : "s") + " — one PURGE record, as durable as any other write.");
+}
+
+/* ===================== rendering ===================== */
+
+function $(id){ return document.getElementById(id); }
+function el(tag, cls, text){
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function note(kind, text){
+  if (S.dead && kind !== "bad") return;
+  banner(kind === "bad" ? "bad" : "ok", kind === "bad" ? "REFUSED" : "OK", text, null, null);
+}
+
+function banner(kind, tag, text, label, fn){
+  var host = $("banner");
+  host.className = "banner on banner--" + kind;
+  host.textContent = "";
+  host.appendChild(el("span", "banner__tag", tag));
+  host.appendChild(el("p", "banner__txt", text));
+  if (label){
+    var btn = el("button", null, label);
+    btn.type = "button";
+    btn.addEventListener("click", function(){ fn(); });
+    host.appendChild(btn);
+  }
+}
+function clearBanner(){ $("banner").className = "banner"; }
+
+function counts(){
+  var c = {ready:0, delayed:0, leased:0, done:0, dead:0}, i, job;
+  for (i = 0; i < S.order.length; i++){
+    job = S.jobs[S.order[i]];
+    if (!job) continue;
+    if (job.state === "ready") (job.available_at > S.now ? c.delayed++ : c.ready++);
+    else c[job.state]++;
+  }
+  return c;
+}
+
+/* A KPI row, not a chart: five headline numbers whose job is to be read,
+   not compared as magnitudes. Each tile carries a dot AND a word, so the
+   status colour is never the only thing telling you which state it is. */
+var DECK = [
+  ["ready", "Ready"], ["delayed", "Delayed"], ["leased", "Leased"],
+  ["done", "Done"], ["dead", "Dead-letter"]
+];
+
+function renderDeck(){
+  var c = counts(), host = $("deck"), i;
+  host.textContent = "";
+  for (i = 0; i < DECK.length; i++){
+    var key = DECK[i][0];
+    var tile = el("div", "tile tile--" + key);
+    tile.appendChild(el("b", null, String(c[key])));
+    var lab = el("span");
+    lab.appendChild(el("i"));
+    lab.appendChild(document.createTextNode(DECK[i][1]));
+    tile.appendChild(lab);
+    host.appendChild(tile);
+  }
+}
+
+function renderJobs(){
+  var host = $("jobs"), i;
+  host.textContent = "";
+  $("jobcount").textContent = S.order.length + (S.order.length === 1 ? " job" : " jobs");
+
+  if (S.dead){
+    host.appendChild(el("div", "empty",
+      "The in-memory index died with the process. The log on the right is all that survives — press Recover."));
+    return;
+  }
+  if (!S.order.length){
+    host.appendChild(el("div", "empty", "No jobs. Enqueue one, or run a recipe above."));
+    return;
+  }
+
+  for (i = 0; i < S.order.length; i++){
+    var job = S.jobs[S.order[i]];
+    if (!job) continue;
+    var state = job.state;
+    if (state === "ready" && job.available_at > S.now) state = "delayed";
+
+    var meta = "attempt " + job.attempts + "/" + job.max_attempts + " · prio " + job.priority;
+    if (state === "delayed") meta += " · available in " + Math.max(0, Math.round(job.available_at - S.now)) + "s";
+    if (state === "leased")  meta += " · expires in " + Math.max(0, Math.round(job.lease_deadline - S.now)) + "s";
+    if (job.last_error)      meta += " · " + job.last_error;
+
+    var row = el("button", "job" + (S.selected === job.id ? " sel" : ""));
+    row.type = "button";
+    row.setAttribute("data-id", job.id);
+    row.setAttribute("aria-pressed", S.selected === job.id ? "true" : "false");
+
+    var top = el("div", "job__top");
+    top.appendChild(el("span", "job__id", job.id));
+    var pill = el("span", "pill " + state);
+    pill.appendChild(el("i"));
+    pill.appendChild(document.createTextNode(state));
+    top.appendChild(pill);
+
+    row.appendChild(top);
+    row.appendChild(el("div", "job__pay", stable(job.payload)));
+    row.appendChild(el("div", "job__meta", meta));
+    host.appendChild(row);
+  }
+}
+
+function renderLog(){
+  var host = $("log"), i;
+  host.textContent = "";
+  var result = scan(S.bytes, HEADER_SIZE);
+  $("logname").textContent = "jobs/default." + String(S.generation).padStart(6, "0") + ".log";
+  $("logsize").textContent = S.bytes.length + " B";
+
+  var grew = result.records.length > lastRecordCount;
+  for (i = 0; i < result.records.length; i++){
+    var r = result.records[i];
+    var row = el("div", "lr" + (grew && i >= lastRecordCount ? " lr--new" : ""));
+    row.appendChild(el("span", "lr__o", "@" + r.offset));
+    row.appendChild(el("span", "lr__t " + TYPE_CLASS[r.type], TYPE_NAME[r.type]));
+    row.appendChild(el("span", "lr__b", stable(r.payload)));
+    host.appendChild(row);
+  }
+  lastRecordCount = result.records.length;
+
+  if (result.damage !== "none"){
+    var bad = el("div", "lr lr--bad");
+    bad.appendChild(el("span", "lr__o", "@" + result.validEnd));
+    bad.appendChild(el("span", "lr__t", "DAMAGE"));
+    bad.appendChild(el("span", "lr__b",
+      (S.bytes.length - result.validEnd) + " bytes — " + result.damage));
+    host.appendChild(bad);
+  } else if (!result.records.length){
+    host.appendChild(el("div", "empty", "Header only — 16 bytes, no records yet."));
+  }
+
+  host.scrollTop = host.scrollHeight;
+  renderHex(result.validEnd);
+}
+
+/* A hex dump of the tail, because the tail is where the interesting
+   damage lives. Bytes past the last valid record are marked, which is
+   the whole point: the file looks fine until you check the checksum. */
+function renderHex(validEnd){
+  var host = $("hex"), i;
+  host.textContent = "";
+
+  var torn = validEnd < S.bytes.length;
+  host.appendChild(el("h3", null, S.bytes.length === HEADER_SIZE
+    ? "Bytes on disk — the file header"
+    : (torn ? "Last bytes on disk — red is past the last valid record" : "Last bytes on disk")));
+
+  var start = S.bytes.length === HEADER_SIZE ? 0 : Math.max(HEADER_SIZE, S.bytes.length - 64);
+  var row = null;
+  for (i = start; i < S.bytes.length; i++){
+    if ((i - start) % 16 === 0){
+      row = el("div", "hex__row");
+      row.appendChild(el("span", "hex__off", "@" + String(i).padStart(4, "0")));
+      host.appendChild(row);
+    } else if ((i - start) % 8 === 0){
+      row.appendChild(el("span", "hex__gap"));
+    }
+    row.appendChild(el("span", "hex__b" + (i >= validEnd ? " bad" : ""),
+      S.bytes[i].toString(16).padStart(2, "0") + " "));
+  }
+}
+
+function render(){
+  renderDeck();
+  renderJobs();
+  renderLog();
+  $("clockread").textContent = "t+" + S.now + "s";
+  $("selname").textContent = S.selected || "";
+  $("b-crash").disabled = S.dead;
+  $("b-flip").disabled = S.dead;
+  $("b-recover").disabled = !S.dead;
+  var ids = ["b-enqueue","b-enqueue5","b-lease","b-lease3","b-ack","b-nack",
+             "b-extend","b-t5","b-t35","b-t300","b-compact","b-requeue","b-purge"];
+  for (var i = 0; i < ids.length; i++) $(ids[i]).disabled = S.dead;
+  var needsSel = ["b-ack","b-nack","b-extend"];
+  for (i = 0; i < needsSel.length; i++) $(needsSel[i]).disabled = S.dead || !S.selected;
+}
+
+/* ===================== wiring ===================== */
+
+function parsePayload(text){
+  try { return JSON.parse(text); } catch (e){ return text; }
+}
+function num(id, fallback){
+  var v = parseFloat($(id).value);
+  return isNaN(v) ? fallback : v;
+}
+function act(fn){ return function(){ fn(); render(); }; }
+
+$("b-enqueue").addEventListener("click", act(function(){
+  var id = enqueue(parsePayload($("payload").value), num("priority",0), num("delay",0), Math.max(1, num("maxatt",3)));
+  if (id) note("ok", "Enqueued " + id + " — fsynced before the call returned.");
+}));
+$("b-enqueue5").addEventListener("click", act(function(){
+  for (var i = 0; i < 5; i++){
+    enqueue(parsePayload($("payload").value), num("priority",0), num("delay",0), Math.max(1, num("maxatt",3)));
+  }
+  note("ok", "Enqueued 5 jobs. In the real thing, enqueue_many would make that one write and one fsync.");
+}));
+$("b-lease").addEventListener("click",  act(function(){ lease(1); }));
+$("b-lease3").addEventListener("click", act(function(){ lease(3); }));
+$("b-ack").addEventListener("click",    act(function(){ if (S.selected) ack(S.selected); }));
+$("b-nack").addEventListener("click",   act(function(){ if (S.selected) nack(S.selected, "handler raised RuntimeError"); }));
+$("b-extend").addEventListener("click", act(function(){ if (S.selected) extend(S.selected); }));
+$("b-t5").addEventListener("click",     act(function(){ advance(5); }));
+$("b-t35").addEventListener("click",    act(function(){ advance(35); }));
+$("b-t300").addEventListener("click",   act(function(){ advance(300); }));
+$("b-crash").addEventListener("click",  act(crash));
+$("b-flip").addEventListener("click",   act(flipBit));
+$("b-recover").addEventListener("click", function(){ recover(); });
+$("b-compact").addEventListener("click", act(compact));
+$("b-requeue").addEventListener("click", act(requeueDead));
+$("b-purge").addEventListener("click",   act(purge));
+$("b-reset").addEventListener("click", function(){
+  S = fresh(); lastRecordCount = 0; clearBanner(); seed(); render();
+});
+
+$("jobs").addEventListener("click", function(e){
+  var row = e.target.closest(".job");
+  if (!row) return;
+  var id = row.getAttribute("data-id");
+  S.selected = (S.selected === id) ? null : id;
+  render();
+});
+
+/* One status line instead of a paragraph under every group: the
+   explanation for a control shows up when you reach for it. */
+var HINT_DEFAULT = "Hover a control to see what it does. Everything writes a record before it changes memory.";
+function showHint(e){
+  var src = e.target.closest("[data-hint]");
+  $("hintline").textContent = src ? src.getAttribute("data-hint") : HINT_DEFAULT;
+}
+var cmd = document.querySelector(".cmd");
+cmd.addEventListener("mouseover", showHint);
+cmd.addEventListener("focusin", showHint);
+cmd.addEventListener("mouseleave", function(){ $("hintline").textContent = HINT_DEFAULT; });
+
+/* Theme toggle. The label names the theme you get by pressing it, not the
+   one you are in -- a button says what it does. One word is ambiguous on
+   its own, so the accessible name spells the action out in full. */
+var themeMedia = matchMedia("(prefers-color-scheme: dark)");
+function isDark(){
+  var set = document.documentElement.getAttribute("data-theme");
+  return set ? set === "dark" : themeMedia.matches;
+}
+function syncThemeLabel(){
+  var next = isDark() ? "Light" : "Dark";
+  var btn = $("themetoggle");
+  btn.textContent = next;
+  btn.title = "Switch to " + next.toLowerCase() + " theme";
+  btn.setAttribute("aria-label", btn.title);
+}
+$("themetoggle").addEventListener("click", function(){
+  document.documentElement.setAttribute("data-theme", isDark() ? "light" : "dark");
+  syncThemeLabel();
+});
+/* Until a choice is made the page follows the OS, so the label has to
+   follow it too. After a click, data-theme wins and this stops mattering. */
+function onSystemTheme(){ if (!document.documentElement.getAttribute("data-theme")) syncThemeLabel(); }
+if (themeMedia.addEventListener) themeMedia.addEventListener("change", onSystemTheme);
+else if (themeMedia.addListener) themeMedia.addListener(onSystemTheme);
+syncThemeLabel();
+
+/* ---------------- guided recipes ---------------- */
+var RECIPES = {
+  crash: function(){
+    reset();
+    for (var i = 0; i < 4; i++) enqueue({to:"user-" + i + "@example.com"}, 0, 0, 3);
+    lease(2);
+    ack(S.order[0]);
+    crash();
+  },
+  expire: function(){
+    reset();
+    enqueue({report:"quarterly.pdf"}, 0, 0, 3);
+    lease(1);
+    advance(35);
+    note("ok", "The lease deadline passed, so the job was reclaimed with backoff — exactly as a nack would be. Note the RECLAIM record in the log.");
+  },
+  fence: function(){
+    reset();
+    enqueue({charge:1999}, 0, 0, 3);
+    lease(1);
+    var stale = S.selected;
+    advance(35);          /* the lease expires and the job is reclaimed */
+    ack(stale);           /* the original worker finally finishes */
+  },
+  dlq: function(){
+    reset();
+    var id = enqueue({charge:4999, card:"4242"}, 0, 0, 3);
+    for (var i = 0; i < 3; i++){
+      lease(1);
+      nack(id, "payment gateway timeout");
+      advance(40);
+    }
+    S.selected = id;
+    note("bad", "Three attempts, three failures — the job is in the dead-letter queue. Press Requeue DLQ once you have 'fixed the bug'.");
+  },
+  compact: function(){
+    reset();
+    for (var i = 0; i < 12; i++) enqueue({thumbnail:"photo-" + i + ".jpg"}, 0, 0, 3);
+    lease(3);
+    var leased = S.order.filter(function(id){ return S.jobs[id].state === "leased"; });
+    for (i = 0; i < leased.length; i++) ack(leased[i]);
+    compact();
+  }
+};
+function reset(){ S = fresh(); lastRecordCount = 0; clearBanner(); }
+
+var recipeButtons = document.querySelectorAll("[data-recipe]");
+for (var r = 0; r < recipeButtons.length; r++){
+  recipeButtons[r].addEventListener("click", function(){
+    RECIPES[this.getAttribute("data-recipe")]();
+    render();
+  });
+}
+
+/* ---------------- boot ---------------- */
+function seed(){
+  enqueue({to:"ada@example.com"}, 0, 0, 3);
+  enqueue({to:"grace@example.com"}, 5, 0, 3);
+  enqueue({to:"alan@example.com"}, 0, 60, 3);
+  clearBanner();
+}
+S = fresh();
+seed();
+$("hintline").textContent = HINT_DEFAULT;
+render();
+})();
+</script>
+</body>
+</html>

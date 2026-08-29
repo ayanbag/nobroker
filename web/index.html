@@ -1,0 +1,1940 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nobroker — the job queue with nobody in the middle</title>
+<meta name="description" content="A durable, crash-safe job queue for Python. No Redis, no RabbitMQ, no server, no dependencies — just the standard library and a file.">
+<link rel="icon" href="./assets/logo.svg">
+<meta property="og:title" content="nobroker — the job queue with nobody in the middle">
+<meta property="og:description" content="A durable, crash-safe job queue for Python. Zero dependencies, 124 tests, one file on disk.">
+<meta property="og:image" content="./assets/banner-thumbnail.svg">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+/* ===================================================================
+   Shared design system with playground.html.
+
+   The five job-state hues are a STATUS set: every one ships beside a
+   word, never alone. They were validated against these exact surfaces
+   for colour-vision separation rather than picked by eye -- the pair
+   that matters is done-vs-dead, which a naive green/red choice puts at
+   deltaE 3 under protanopia.
+
+   The interactive accent is violet precisely because no state uses it,
+   so a link can never read as a job status.
+   =================================================================== */
+:root{
+  color-scheme: light;
+  --bg:#F4F6F8;
+  --surface:#FFFFFF;
+  --surface-2:#F7F9FB;
+  --surface-3:#EDF1F5;
+  --line:#DDE3EA;
+  --line-soft:#EAEFF4;
+  --ink:#0E1620;
+  --ink-2:#4A5866;
+  --ink-3:#78889A;
+
+  --accent:#6D4AE0;
+  --accent-wash:#F0ECFC;
+
+  --ready:#1F6FD6;
+  --delayed:#6B7684;
+  --leased:#B27400;
+  --done:#0E9E76;
+  --dead:#D0342E;
+  --dead-wash:#FCECEB;
+
+  --mono: ui-monospace,"SFMono-Regular","SF Mono","Cascadia Mono","Cascadia Code",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --sans: ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --max:1280px;
+  --measure:68ch;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#080B10;
+    --surface:#12171F;
+    --surface-2:#171E28;
+    --surface-3:#1E2733;
+    --line:#242E3B;
+    --line-soft:#1A222D;
+    --ink:#E9EFF6;
+    --ink-2:#9BAABC;
+    --ink-3:#69788A;
+    --accent:#8B7BF7;
+    --accent-wash:#1D1B33;
+    --ready:#2E7FDE;
+    --delayed:#5F6B7C;
+    --leased:#C4870F;
+    --done:#0FA47E;
+    --dead:#E14B45;
+    --dead-wash:#2A1618;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#080B10;
+  --surface:#12171F;
+  --surface-2:#171E28;
+  --surface-3:#1E2733;
+  --line:#242E3B;
+  --line-soft:#1A222D;
+  --ink:#E9EFF6;
+  --ink-2:#9BAABC;
+  --ink-3:#69788A;
+  --accent:#8B7BF7;
+  --accent-wash:#1D1B33;
+  --ready:#2E7FDE;
+  --delayed:#5F6B7C;
+  --leased:#C4870F;
+  --done:#0FA47E;
+  --dead:#E14B45;
+  --dead-wash:#2A1618;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{
+  margin:0;background:var(--surface);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+.container{max-width:var(--max);margin:0 auto;padding:0 40px;width:100%}
+
+/* ================= top bar ================= */
+.bar{
+  position:sticky;top:0;z-index:50;
+  background:var(--surface);   /* fallback: a sticky bar must never be see-through */
+  background:color-mix(in srgb, var(--surface) 86%, transparent);
+  -webkit-backdrop-filter:blur(10px);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.bar__in{
+  max-width:var(--max);margin:0 auto;padding:0 40px;
+  display:flex;align-items:center;gap:26px;height:60px;
+}
+.brand{text-decoration:none;color:inherit;flex:0 0 auto;display:flex;align-items:center;gap:9px}
+.brand img{border-radius:6px;display:block}
+.brand b{font-size:17px;font-weight:640;letter-spacing:-.025em}
+.brand i{font-style:normal;color:var(--accent)}
+.tabs{display:flex;gap:2px;flex:1 1 auto;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{
+  font-size:14px;color:var(--ink-2);text-decoration:none;
+  padding:7px 12px;border-radius:7px;white-space:nowrap;
+  transition:color .12s, background .12s;
+}
+.tabs a:hover{color:var(--ink);background:var(--surface-3)}
+.tabs a[aria-current="page"]{color:var(--accent);background:var(--accent-wash);font-weight:560}
+.bar__end{display:flex;gap:8px;flex:0 0 auto;align-items:center}
+.chip{
+  font-size:13px;border:1px solid var(--line);border-radius:7px;
+  padding:6px 12px;background:var(--surface);color:var(--ink-2);
+  cursor:pointer;text-decoration:none;white-space:nowrap;
+}
+.chip:hover{color:var(--ink);border-color:var(--ink-3)}
+/* The theme button's label changes between two words of different width;
+   a floor keeps the bar from shifting when it does. */
+#themetoggle{min-width:70px}
+.chip--go{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:560}
+.chip--go:hover{background:var(--accent);border-color:var(--accent);color:#fff;opacity:.88}
+
+/* ================= typography ================= */
+h1,h2,h3,h4{font-family:var(--sans);font-weight:650;letter-spacing:-.028em;text-wrap:balance;margin:0}
+h1{font-size:clamp(36px,5.6vw,68px);line-height:1.04;letter-spacing:-.036em}
+h2{font-size:clamp(25px,2.9vw,35px);line-height:1.15;margin-bottom:16px;letter-spacing:-.032em}
+h3{font-size:19px;line-height:1.35;margin:34px 0 11px;letter-spacing:-.018em}
+h4{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);margin:0 0 9px;font-weight:640}
+p{margin:0 0 17px;max-width:var(--measure)}
+ul,ol{max-width:var(--measure);margin:0 0 17px;padding-left:1.2em}
+li{margin-bottom:8px}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:3px}
+code{
+  font-family:var(--mono);font-size:.87em;background:var(--surface-3);
+  border:1px solid var(--line-soft);padding:.09em .36em;border-radius:5px;
+}
+pre{
+  font-family:var(--mono);font-size:13.5px;line-height:1.7;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 20px;margin:0 0 20px;overflow-x:auto;
+}
+pre code{background:none;border:0;padding:0;font-size:inherit}
+.tok-c{color:var(--ink-3);font-style:italic}
+.tok-k{color:var(--accent)}
+.tok-s{color:var(--done)}
+.tok-n{color:var(--leased)}
+
+/* ================= bands ================= */
+.band{border-bottom:1px solid var(--line);padding:76px 0}
+.band--tint{background:var(--surface-2)}
+.band--tight{padding:52px 0}
+.eyebrow{
+  font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
+  color:var(--ink-3);margin-bottom:16px;display:flex;align-items:center;gap:12px;
+}
+.eyebrow::after{content:"";height:1px;background:var(--line);flex:1 1 auto;max-width:150px}
+.eyebrow b{color:var(--accent);font-weight:650}
+
+/* ================= hero ================= */
+.hero{padding:84px 0 74px;border-bottom:1px solid var(--line);overflow:hidden}
+.hero__grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.02fr);gap:60px;align-items:center}
+.hero h1{margin-bottom:24px}
+.hero h1 u{text-decoration:none;color:var(--accent)}
+.hero__lede{font-size:20px;line-height:1.55;color:var(--ink-2);max-width:52ch;margin-bottom:28px}
+.hero__lede b{color:var(--ink);font-weight:600}
+.cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:32px}
+.btn{
+  font-size:14.5px;font-weight:560;
+  padding:12px 20px;border:1px solid var(--ink);border-radius:8px;
+  text-decoration:none;color:var(--surface);background:var(--ink);
+  display:inline-flex;align-items:center;gap:9px;cursor:pointer;
+  transition:opacity .12s, background .12s, border-color .12s, color .12s;
+}
+.btn:hover{opacity:.86}
+.btn--ghost{background:var(--surface);color:var(--ink);border-color:var(--line)}
+.btn--ghost:hover{background:var(--surface-3);color:var(--ink);border-color:var(--ink-3);opacity:1}
+.hero__facts{display:flex;gap:34px;flex-wrap:wrap}
+.fact b{
+  display:block;font-family:var(--mono);font-size:26px;font-weight:600;
+  line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+}
+.fact span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:560}
+.fact--zero b{color:var(--accent)}
+
+/* ================= live log ================= */
+.logbox{
+  border:1px solid var(--line);background:var(--surface-2);border-radius:var(--radius);
+  font-family:var(--mono);font-size:12.5px;overflow:hidden;
+}
+.logbox__bar{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:11px 16px;border-bottom:1px solid var(--line);
+  font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:600;
+}
+.logbox__bar b{font-weight:600;color:var(--ink-2);letter-spacing:0;text-transform:none;font-size:12px}
+.logbox__body{height:296px;overflow:hidden;padding:12px 0}
+.lrow{
+  display:grid;grid-template-columns:62px 84px 1fr;gap:12px;padding:3px 16px;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.lrow--new{animation:slidein .32s ease-out}
+@keyframes slidein{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.lrow__off{color:var(--ink-3)}
+.lrow__type{font-weight:650;letter-spacing:.03em}
+.lrow__body{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis}
+/* Record types borrow the hue of the state they produce, matching the
+   playground: a colour means the same thing on both pages. */
+.t-ENQUEUE{color:var(--ink-2)} .t-LEASE{color:var(--leased)}
+.t-ACK{color:var(--done)} .t-NACK{color:var(--delayed)}
+.lrow--torn *{color:var(--dead)!important}
+.lrow--torn{background:var(--dead-wash)}
+.logbox__foot{
+  border-top:1px solid var(--line);padding:11px 16px;font-size:12px;
+  color:var(--ink-2);display:flex;gap:9px;align-items:center;min-height:41px;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--done);flex:0 0 auto}
+.dot--bad{background:var(--dead)}
+
+/* ================= figures ================= */
+figure{margin:0 0 8px}
+figure svg{width:100%;height:auto;display:block;color:var(--ink)}
+figcaption{
+  font-size:13.5px;color:var(--ink-3);
+  margin-top:14px;max-width:76ch;line-height:1.6;
+}
+.svg-lbl{font-family:var(--mono);font-size:12px;fill:currentColor}
+.svg-lbl--sm{font-size:10.5px;fill:var(--ink-3);letter-spacing:.05em}
+.svg-box{fill:var(--surface-2);stroke:currentColor;stroke-width:1.25}
+.svg-box--hot{fill:none;stroke:var(--dead);stroke-width:1.5}
+.svg-box--good{fill:none;stroke:var(--done);stroke-width:1.5}
+.svg-line{stroke:currentColor;stroke-width:1.25;fill:none}
+.svg-line--hot{stroke:var(--dead);stroke-width:1.5;fill:none}
+.svg-line--ghost{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 4;fill:none}
+.svg-hot{fill:var(--dead)}
+.svg-good{fill:var(--done)}
+.svg-dim{fill:var(--ink-3)}
+
+.flow{stroke-dasharray:5 7;animation:flow 1.1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-24}}
+.pulse{animation:pulse 2.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.32}50%{opacity:1}}
+
+/* state-machine token — the thing in motion, so it wears the accent */
+.token{fill:var(--accent);animation:ride 9s cubic-bezier(.6,0,.4,1) infinite}
+@keyframes ride{
+  0%,8%    {transform:translate(96px,0)}
+  16%,30%  {transform:translate(330px,0)}
+  38%,50%  {transform:translate(575px,0)}
+  56%      {transform:translate(575px,0);opacity:1}
+  57%      {opacity:0}
+  58%      {transform:translate(96px,0);opacity:0}
+  62%,70%  {transform:translate(96px,0);opacity:1}
+  78%,88%  {transform:translate(330px,0)}
+  96%,100% {transform:translate(330px,110px)}
+}
+
+/* write-head sweep on the record frame */
+.head{fill:var(--accent);opacity:.14;animation:sweep 5.5s ease-in-out infinite}
+@keyframes sweep{
+  0%{width:0}
+  46%{width:520px}
+  56%{width:598px}
+  57%,100%{width:598px;opacity:.14}
+}
+
+/* ================= grids and cards ================= */
+.cols{display:grid;gap:20px}
+.cols--2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.cols--3{grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+.cols--4{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+.card{
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:22px 24px;background:var(--surface);
+}
+.band--tint .card{background:var(--surface)}
+.card h4{color:var(--ink);font-size:15px;letter-spacing:-.015em;text-transform:none;font-weight:620}
+.card p{font-size:15px;color:var(--ink-2);margin:0;max-width:none}
+.card__n{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em;margin-bottom:10px}
+
+.split{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:56px;align-items:start}
+
+/* ================= tables ================= */
+.tablewrap{
+  overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);
+  margin:0 0 22px;background:var(--surface);
+}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+th{
+  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:640;background:var(--surface-2);border-bottom:1px solid var(--line);
+}
+td{font-family:var(--mono);font-size:13.5px}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+td em{font-style:normal;color:var(--ink-3)}
+tr.hi td{background:var(--accent-wash);font-weight:650}
+
+/* ================= notes ================= */
+.note{
+  border:1px solid var(--line);border-left:3px solid var(--leased);
+  border-radius:var(--radius);background:var(--surface);
+  padding:20px 22px;margin:0 0 22px;max-width:var(--measure);
+}
+.band--tint .note{background:var(--surface)}
+.note--warn{border-left-color:var(--dead)}
+.note--good{border-left-color:var(--done)}
+.note h4{color:var(--ink);text-transform:none;letter-spacing:-.015em;font-size:15px;font-weight:620}
+.note p:last-child{margin-bottom:0}
+
+/* ================= docs pages ================= */
+.doc{padding:56px 0 90px}
+.doc__grid{display:grid;grid-template-columns:minmax(0,1fr) 216px;gap:56px;align-items:start}
+.toc{
+  position:sticky;top:84px;font-size:13.5px;
+  border-left:1px solid var(--line);padding-left:18px;
+}
+.toc b{
+  display:block;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:10px;font-weight:640;
+}
+.toc a{display:block;color:var(--ink-2);text-decoration:none;padding:5px 0;line-height:1.4}
+.toc a:hover{color:var(--accent)}
+.doc h1{font-size:clamp(31px,4.2vw,46px);margin-bottom:14px}
+.doc__lede{font-size:18.5px;color:var(--ink-2);max-width:58ch;margin-bottom:34px;line-height:1.55}
+.doc h2{margin-top:52px;scroll-margin-top:78px}
+.doc h2:first-of-type{margin-top:34px}
+
+/* ================= reveal ================= */
+.rv{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+.rv.in{opacity:1;transform:none}
+
+.page{display:none}
+.page.is-on{display:block}
+
+.foot{padding:38px 0 52px;font-size:13.5px;color:var(--ink-3);border-top:1px solid var(--line)}
+.foot__in{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.foot a{color:var(--ink-2)}
+
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+@media (max-width:1000px){
+  .hero__grid,.split,.doc__grid{grid-template-columns:1fr;gap:36px}
+  .toc{display:none}
+  .container,.bar__in{padding:0 22px}
+  .band{padding:52px 0}
+  .hero{padding:52px 0 46px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .rv{opacity:1;transform:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar__in">
+    <a class="brand" href="#/">
+      <img src="./assets/logo.svg" width="26" height="26" alt="" aria-hidden="true">
+      <b>nobroker<i>/</i></b>
+    </a>
+    <nav class="tabs">
+      <a href="#/">Overview</a>
+      <a href="#/start">Quickstart</a>
+      <a href="#/guide">Guide</a>
+      <a href="#/api">API</a>
+      <a href="#/design">Design</a>
+      <a href="#/faq">Objections</a>
+    </nav>
+    <div class="bar__end">
+      <button class="chip" id="themetoggle" type="button">Dark</button>
+      <a class="chip chip--go" href="./playground.html">Playground →</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- =========================== OVERVIEW =========================== -->
+<section class="page" id="p-home">
+
+  <div class="hero">
+    <div class="container">
+      <div class="hero__grid">
+        <div>
+          <div class="eyebrow">A durable job queue for Python</div>
+          <h1>The job queue with <u>nobody</u> in the middle.</h1>
+          <p class="hero__lede">Enqueue work, lease it, ack it. It survives <code>kill -9</code>,
+          it is safe across processes, and it needs <b>no Redis, no RabbitMQ, no server, and no
+          dependencies at all</b> — just the standard library and a file.</p>
+          <div class="cta">
+            <a class="btn" href="./playground.html">Break it in the playground</a>
+            <a class="btn btn--ghost" href="#/start">Quickstart</a>
+          </div>
+          <div class="hero__facts">
+            <div class="fact fact--zero"><b>0</b><span>dependencies</span></div>
+            <div class="fact"><b>124</b><span>tests passing</span></div>
+            <div class="fact"><b>1</b><span>file on disk</span></div>
+            <div class="fact"><b>3.11+</b><span>python</span></div>
+          </div>
+        </div>
+
+        <div class="logbox">
+          <div class="logbox__bar"><b>jobs/emails.000001.log</b><span id="hero-state">appending</span></div>
+          <div class="logbox__body" id="hero-log"></div>
+          <div class="logbox__foot"><span class="dot" id="hero-dot"></span><span id="hero-msg">Every record is length-prefixed and CRC-checksummed.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- architecture model ---------- -->
+  <div class="band">
+    <div class="container">
+      <div class="eyebrow"><b>the model</b> what a broker actually costs you</div>
+      <h2>Same guarantee. One fewer moving part.</h2>
+      <p style="max-width:74ch;font-size:18px;color:var(--ink-2)">A broker gives you three things:
+      durable storage, a serialisation point, and a network endpoint. On a single machine you do not
+      need the third — and the operating system already gives you the first two.</p>
+
+      <figure class="rv" style="margin-top:34px">
+        <svg viewBox="0 0 1180 300" role="img" aria-label="With a broker, three worker processes cross a network boundary to a broker server that owns the disk. With nobroker, the same three processes call fsync and flock directly on one shared file.">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+            <marker id="arh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--dead)"/>
+            </marker>
+          </defs>
+
+          <!-- ============ LEFT: with a broker ============ -->
+          <text class="svg-lbl svg-lbl--sm" x="0" y="14">TODAY — CELERY, RQ, DRAMATIQ</text>
+
+          <rect class="svg-box" x="0"  y="36" width="112" height="34" rx="2"/>
+          <rect class="svg-box" x="0"  y="82" width="112" height="34" rx="2"/>
+          <rect class="svg-box" x="0"  y="128" width="112" height="34" rx="2"/>
+          <text class="svg-lbl" x="56" y="58"  text-anchor="middle">worker 1</text>
+          <text class="svg-lbl" x="56" y="104" text-anchor="middle">worker 2</text>
+          <text class="svg-lbl" x="56" y="150" text-anchor="middle">worker 3</text>
+
+          <!-- network boundary -->
+          <line class="svg-line--ghost" x1="196" y1="24" x2="196" y2="252"/>
+          <text class="svg-lbl svg-lbl--sm" x="196" y="270" text-anchor="middle">network boundary</text>
+
+          <path class="svg-line--hot flow" d="M112,53  H286" marker-end="url(#arh)"/>
+          <path class="svg-line--hot flow" d="M112,99  H286" marker-end="url(#arh)"/>
+          <path class="svg-line--hot flow" d="M112,145 H286" marker-end="url(#arh)"/>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="150" y="78" text-anchor="middle">TCP</text>
+
+          <rect class="svg-box--hot" x="288" y="60" width="128" height="78" rx="2"/>
+          <text class="svg-lbl svg-hot" x="352" y="93"  text-anchor="middle">broker</text>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="352" y="112" text-anchor="middle">a process you run</text>
+
+          <path class="svg-line" d="M352,138 V186" marker-end="url(#ar)"/>
+          <rect class="svg-box" x="288" y="188" width="128" height="40" rx="2"/>
+          <text class="svg-lbl" x="352" y="213" text-anchor="middle">disk</text>
+
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="0" y="200">+ a server to deploy</text>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="0" y="220">+ a server to monitor</text>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="0" y="240">+ a server to keep alive</text>
+
+          <!-- divider -->
+          <line class="svg-line--ghost" x1="500" y1="0" x2="500" y2="300"/>
+
+          <!-- ============ RIGHT: nobroker ============ -->
+          <text class="svg-lbl svg-lbl--sm" x="560" y="14">NOBROKER</text>
+
+          <rect class="svg-box" x="560" y="36"  width="112" height="34" rx="2"/>
+          <rect class="svg-box" x="560" y="82"  width="112" height="34" rx="2"/>
+          <rect class="svg-box" x="560" y="128" width="112" height="34" rx="2"/>
+          <text class="svg-lbl" x="616" y="58"  text-anchor="middle">worker 1</text>
+          <text class="svg-lbl" x="616" y="104" text-anchor="middle">worker 2</text>
+          <text class="svg-lbl" x="616" y="150" text-anchor="middle">worker 3</text>
+
+          <path class="svg-line flow" d="M672,53  H846" marker-end="url(#ar)"/>
+          <path class="svg-line flow" d="M672,99  H846" marker-end="url(#ar)"/>
+          <path class="svg-line flow" d="M672,145 H846" marker-end="url(#ar)"/>
+          <text class="svg-lbl svg-lbl--sm" x="759" y="42" text-anchor="middle">flock()</text>
+          <text class="svg-lbl svg-lbl--sm" x="759" y="90" text-anchor="middle">write()</text>
+          <text class="svg-lbl svg-lbl--sm" x="759" y="136" text-anchor="middle">fsync()</text>
+
+          <rect class="svg-box--good" x="848" y="36" width="150" height="126" rx="2"/>
+          <text class="svg-lbl svg-good" x="923" y="88"  text-anchor="middle">emails.log</text>
+          <text class="svg-lbl svg-lbl--sm" x="923" y="108" text-anchor="middle">append-only</text>
+          <text class="svg-lbl svg-lbl--sm" x="923" y="126" text-anchor="middle">one file</text>
+
+          <path class="svg-line" d="M923,162 V186" marker-end="url(#ar)"/>
+          <rect class="svg-box" x="848" y="188" width="150" height="40" rx="2"/>
+          <text class="svg-lbl" x="923" y="213" text-anchor="middle">disk</text>
+
+          <text class="svg-lbl svg-lbl--sm svg-good" x="1018" y="72">no network hop</text>
+          <text class="svg-lbl svg-lbl--sm svg-good" x="1018" y="92">no serialisation</text>
+          <text class="svg-lbl svg-lbl--sm svg-good" x="1018" y="112">to a wire format</text>
+          <text class="svg-lbl svg-lbl--sm svg-good" x="1018" y="132">nothing to deploy</text>
+        </svg>
+        <figcaption>The only structural difference is the middle column. The kernel already
+        serialises the writers (<code>flock</code>) and already makes the bytes durable
+        (<code>fsync</code>) — the broker is re-implementing both, on the far side of a socket.</figcaption>
+      </figure>
+
+      <div class="tablewrap rv" style="margin-top:40px">
+        <table>
+          <thead><tr><th>Option</th><th>What you install</th><th>What you operate</th></tr></thead>
+          <tbody>
+            <tr><td>Celery</td><td>celery, kombu, billiard, vine, amqp…</td><td>a Redis or RabbitMQ server</td></tr>
+            <tr><td>RQ</td><td>rq, redis</td><td>a Redis server</td></tr>
+            <tr><td>Dramatiq</td><td>dramatiq, pika <em>or</em> redis</td><td>a broker</td></tr>
+            <tr class="hi"><td>nobroker</td><td>nothing</td><td>nothing</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note note--warn" style="max-width:74ch">
+        <h4>It is not a Celery replacement for a fleet</h4>
+        <p>The lock is a kernel file lock. It does not work over NFS, and it will not coordinate two
+        hosts. There is no distributed mode and there will not be one.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- job lifecycle model ---------- -->
+  <div class="band band--tint">
+    <div class="container">
+      <div class="eyebrow"><b>the model</b> what happens to a job</div>
+      <h2>Four states, and every edge is a record on disk</h2>
+
+      <figure class="rv" style="margin-top:30px">
+        <svg viewBox="0 0 760 250" role="img" aria-label="A job moves from ready to leased on lease, then to done on ack. A nack or an expired lease returns it to ready with backoff, until attempts run out and it moves to dead.">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ar2h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--dead)"/>
+            </marker>
+          </defs>
+
+          <!-- states -->
+          <rect class="svg-box" x="26"  y="66" width="140" height="52" rx="2"/>
+          <text class="svg-lbl" x="96" y="90"  text-anchor="middle">READY</text>
+          <text class="svg-lbl svg-lbl--sm" x="96" y="107" text-anchor="middle">available_at ≤ now</text>
+
+          <rect class="svg-box" x="260" y="66" width="140" height="52" rx="2"/>
+          <text class="svg-lbl" x="330" y="90"  text-anchor="middle">LEASED</text>
+          <text class="svg-lbl svg-lbl--sm" x="330" y="107" text-anchor="middle">invisible for 30s</text>
+
+          <rect class="svg-box--good" x="505" y="66" width="140" height="52" rx="2"/>
+          <text class="svg-lbl svg-good" x="575" y="90"  text-anchor="middle">DONE</text>
+          <text class="svg-lbl svg-lbl--sm" x="575" y="107" text-anchor="middle">compaction drops it</text>
+
+          <rect class="svg-box--hot" x="260" y="176" width="140" height="52" rx="2"/>
+          <text class="svg-lbl svg-hot" x="330" y="200" text-anchor="middle">DEAD</text>
+          <text class="svg-lbl svg-lbl--sm" x="330" y="217" text-anchor="middle">the DLQ keeps it</text>
+
+          <!-- edges -->
+          <path class="svg-line" d="M166,84 H252" marker-end="url(#ar2)"/>
+          <text class="svg-lbl svg-lbl--sm" x="209" y="76" text-anchor="middle">lease</text>
+
+          <path class="svg-line" d="M400,84 H497" marker-end="url(#ar2)"/>
+          <text class="svg-lbl svg-lbl--sm" x="448" y="76" text-anchor="middle">ack</text>
+
+          <!-- nack / expiry loop back. The return path runs at y=162, below both
+               boxes, and its label sits above the line inside the x-range the two
+               vertical segments leave clear (96 .. 290). -->
+          <path class="svg-line--hot" d="M290,118 V162 H96 V122" marker-end="url(#ar2h)"/>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="193" y="136" text-anchor="middle">nack — or the lease expires</text>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="193" y="150" text-anchor="middle">retry after backoff</text>
+
+          <path class="svg-line--hot" d="M368,118 V170" marker-end="url(#ar2h)"/>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="474" y="150" text-anchor="middle">attempts exhausted</text>
+
+          <path class="svg-line--ghost" d="M260,204 H58 V122" marker-end="url(#ar2)"/>
+          <text class="svg-lbl svg-lbl--sm" x="152" y="198" text-anchor="middle">requeue_dead()</text>
+
+          <!-- travelling token -->
+          <circle class="token" cx="0" cy="92" r="5"/>
+
+          <text class="svg-lbl svg-lbl--sm" x="26" y="22">DELAYED is not a state — a delayed job is READY with available_at in the future</text>
+        </svg>
+        <figcaption>Attempts are counted on <em>lease</em>, not on completion, so a worker that dies
+        silently still burns one. Every edge here appends a record; nothing changes in memory that
+        did not reach the disk first.</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- ---------- record frame model ---------- -->
+  <div class="band">
+    <div class="container">
+      <div class="eyebrow"><b>the model</b> what a crash actually looks like</div>
+      <div class="split">
+        <div>
+          <h2>A torn tail is expected, not exceptional</h2>
+          <p>Kill a process mid-<code>write</code> and you get half a record. The length prefix
+          catches an incomplete one; the checksum catches the nastier case — a full-length record
+          with a hole in the middle, which would otherwise be applied silently.</p>
+          <p>Recovery truncates back to the last record that checksums, and reports what it
+          discarded. The interrupted operation is simply one whose caller never got a return
+          value.</p>
+          <div class="note note--good" style="max-width:none">
+            <h4>Tested exhaustively, not anecdotally</h4>
+            <p>The suite takes a real log and truncates it at <b>every single byte offset</b>,
+            asserting recovery lands somewhere consistent at each. A crash can only interrupt a
+            write at a byte boundary — so correctness at all ~1,300 boundaries is correctness for
+            any crash that log could have suffered.</p>
+          </div>
+        </div>
+
+        <figure class="rv">
+          <svg viewBox="0 0 620 232" role="img" aria-label="A record is a four-byte length, a one-byte type, a four-byte CRC32, and the JSON payload. A write interrupted partway leaves a partial record whose checksum cannot match.">
+            <text class="svg-lbl svg-lbl--sm" x="0" y="12">ONE RECORD ON DISK</text>
+
+            <rect class="svg-box" x="0"   y="24" width="88"  height="46" rx="2"/>
+            <rect class="svg-box" x="88"  y="24" width="58"  height="46" rx="2"/>
+            <rect class="svg-box" x="146" y="24" width="88"  height="46" rx="2"/>
+            <rect class="svg-box" x="234" y="24" width="364" height="46" rx="2"/>
+
+            <text class="svg-lbl" x="44"  y="46" text-anchor="middle">length</text>
+            <text class="svg-lbl" x="117" y="46" text-anchor="middle">type</text>
+            <text class="svg-lbl svg-good" x="190" y="46" text-anchor="middle">crc32</text>
+            <text class="svg-lbl" x="416" y="46" text-anchor="middle">payload — JSON, n bytes</text>
+            <text class="svg-lbl svg-lbl--sm" x="44"  y="62" text-anchor="middle">uint32</text>
+            <text class="svg-lbl svg-lbl--sm" x="117" y="62" text-anchor="middle">uint8</text>
+            <text class="svg-lbl svg-lbl--sm" x="190" y="62" text-anchor="middle">uint32</text>
+            <text class="svg-lbl svg-lbl--sm" x="416" y="62" text-anchor="middle">{"id":"a81eff54","payload":{…}}</text>
+
+            <!-- animated write head -->
+            <rect class="head" x="0" y="24" width="0" height="46"/>
+
+            <path class="svg-line--ghost" d="M0,80 V92 M598,80 V92"/>
+            <text class="svg-lbl svg-lbl--sm" x="299" y="104" text-anchor="middle">9-byte frame + payload</text>
+
+            <!-- torn -->
+            <text class="svg-lbl svg-lbl--sm svg-hot" x="0" y="140">THE SAME RECORD, INTERRUPTED BY kill -9</text>
+            <rect class="svg-box" x="0"   y="152" width="88"  height="46" rx="2"/>
+            <rect class="svg-box" x="88"  y="152" width="58"  height="46" rx="2"/>
+            <rect class="svg-box" x="146" y="152" width="88"  height="46" rx="2"/>
+            <rect class="svg-box--hot" x="234" y="152" width="118" height="46" rx="2"/>
+            <text class="svg-lbl" x="44"  y="180" text-anchor="middle">length</text>
+            <text class="svg-lbl" x="117" y="180" text-anchor="middle">type</text>
+            <text class="svg-lbl svg-good" x="190" y="180" text-anchor="middle">crc32</text>
+            <text class="svg-lbl svg-hot" x="293" y="180" text-anchor="middle">41 bytes</text>
+
+            <path class="svg-line--hot pulse" d="M352,152 V198"/>
+            <text class="svg-lbl svg-lbl--sm svg-hot" x="366" y="176">← end of file</text>
+
+            <text class="svg-lbl svg-lbl--sm" x="0" y="222">length says 299 · only 41 arrived · truncate here and carry on</text>
+          </svg>
+          <figcaption>The frame is 16 bytes of file header, then this, repeated. Payloads are JSON on
+          purpose: a durability format you cannot read with your eyes is one you cannot debug.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- the four beats ---------- -->
+  <div class="band band--tint">
+    <div class="container">
+      <div class="eyebrow"><b>the model</b> every operation, start to finish</div>
+      <h2>Lock. Catch up. Reap. Append, fsync, apply.</h2>
+      <p style="max-width:74ch;font-size:18px;color:var(--ink-2)">Beat two is what makes several
+      <em>processes</em> safe with no coordinator: a worker that has been idle for an hour just reads
+      forward from its own offset and finds out what happened.</p>
+
+      <div class="cols cols--4 rv" style="margin-top:34px">
+        <div class="card"><div class="card__n">BEAT 01</div><h4>Take the file lock</h4><p>The kernel arbitrates, and releases it automatically when a process dies — including on SIGKILL. No pid file, no stale-lock heuristic.</p></div>
+        <div class="card"><div class="card__n">BEAT 02</div><h4>Catch up</h4><p>Read forward from our last offset, applying whatever peers appended. No heartbeats, no gossip, no notification channel.</p></div>
+        <div class="card"><div class="card__n">BEAT 03</div><h4>Reap expired leases</h4><p>A worker past its deadline is either dead or wedged. Both get the same treatment: back to READY, with backoff.</p></div>
+        <div class="card"><div class="card__n">BEAT 04</div><h4>Append, fsync, apply</h4><p>Disk before memory, always. A crash between the two replays to the same state; the other order loses work the caller was told had succeeded.</p></div>
+      </div>
+
+      <figure class="rv" style="margin-top:44px">
+        <svg viewBox="0 0 1120 184" role="img" aria-label="Timeline of one enqueue: acquire the lock, scan forward from the last offset, reclaim expired leases, append the record, fsync, then mutate memory and release. A crash before fsync completes leaves a torn tail that recovery discards.">
+          <defs>
+            <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <line class="svg-line" x1="0" y1="70" x2="1096" y2="70" marker-end="url(#ar3)"/>
+
+          <g>
+            <line class="svg-line" x1="40"  y1="56" x2="40"  y2="84"/>
+            <line class="svg-line" x1="228" y1="56" x2="228" y2="84"/>
+            <line class="svg-line" x1="416" y1="56" x2="416" y2="84"/>
+            <line class="svg-line" x1="604" y1="56" x2="604" y2="84"/>
+            <line class="svg-line--hot" x1="792" y1="46" x2="792" y2="94"/>
+            <line class="svg-line" x1="980" y1="56" x2="980" y2="84"/>
+          </g>
+
+          <text class="svg-lbl" x="40"  y="42" text-anchor="middle">flock</text>
+          <text class="svg-lbl" x="228" y="42" text-anchor="middle">scan</text>
+          <text class="svg-lbl" x="416" y="42" text-anchor="middle">reap</text>
+          <text class="svg-lbl" x="604" y="42" text-anchor="middle">write</text>
+          <text class="svg-lbl svg-hot" x="792" y="36" text-anchor="middle">fsync</text>
+          <text class="svg-lbl" x="980" y="42" text-anchor="middle">apply + unlock</text>
+
+          <text class="svg-lbl svg-lbl--sm" x="40"  y="106" text-anchor="middle">exclusive</text>
+          <text class="svg-lbl svg-lbl--sm" x="228" y="106" text-anchor="middle">from our offset</text>
+          <text class="svg-lbl svg-lbl--sm" x="416" y="106" text-anchor="middle">expired leases</text>
+          <text class="svg-lbl svg-lbl--sm" x="604" y="106" text-anchor="middle">append record</text>
+          <text class="svg-lbl svg-lbl--sm svg-hot" x="792" y="110" text-anchor="middle">the commit point</text>
+          <text class="svg-lbl svg-lbl--sm" x="980" y="106" text-anchor="middle">memory changes</text>
+
+          <!-- Two captions under two brackets. Each is set on two short lines so
+               it stays inside its own bracket's span (604-792 and 792-1096) --
+               one line long enough to read would overrun into the neighbour. -->
+          <path class="svg-line--ghost" d="M604,132 H792"/>
+          <text class="svg-lbl svg-lbl--sm svg-dim" x="698" y="152" text-anchor="middle">crash in here →</text>
+          <text class="svg-lbl svg-lbl--sm svg-dim" x="698" y="168" text-anchor="middle">torn tail, discarded</text>
+
+          <path class="svg-line--ghost" d="M792,132 H1096"/>
+          <text class="svg-lbl svg-lbl--sm svg-good" x="944" y="152" text-anchor="middle">crash after here →</text>
+          <text class="svg-lbl svg-lbl--sm svg-good" x="944" y="168" text-anchor="middle">the record replays, same state</text>
+        </svg>
+        <figcaption><code>enqueue()</code> returns only once the write is past <code>fsync</code>.
+        If it returned, the job is on the platter — not in a page cache waiting for a power cut.</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- ---------- semantics ---------- -->
+  <div class="band">
+    <div class="container">
+      <div class="eyebrow"><b>the guarantee</b> what is actually promised</div>
+      <h2>At-least-once. Never exactly-once.</h2>
+      <div class="split">
+        <div>
+          <div class="note note--warn" style="max-width:none">
+            <h4>Your handlers must be idempotent</h4>
+            <p>A worker can be killed after its handler finished but before it acked. The lease
+            expires, the job comes back, the email sends twice. No engineering closes that window,
+            because the side effect and the acknowledgement live in different systems.</p>
+          </div>
+          <p>Exactly-once would need the handler's side effect and the queue's acknowledgement to
+          commit in a <em>single transaction</em> — which means the queue must live inside your
+          database, and then it is not a general-purpose queue any more. Anything advertising
+          exactly-once is either doing that, or redefining the term.</p>
+        </div>
+        <div class="cols cols--3">
+          <div class="card"><h4>Fencing tokens</h4><p>Every lease carries a token. If yours expired and the job was redelivered, your <code>ack()</code> is rejected rather than silently completing someone else's delivery. You find out.</p></div>
+          <div class="card"><h4>Lease heartbeats</h4><p>The worker extends the lease of a running handler, so slow-but-healthy is never a source of duplicate work. Only real failures redeliver.</p></div>
+          <div class="card"><h4>Idempotent enqueue</h4><p><code>job_id="order-42"</code> de-duplicates on the key. The one place exactly-once is honestly available, because that is something a log can actually do.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- proof ---------- -->
+  <div class="band band--tint">
+    <div class="container">
+      <div class="eyebrow"><b>the evidence</b> 124 tests, no plugins</div>
+      <div class="split">
+        <div>
+          <h2>Two of these found bugs nothing else would have</h2>
+          <p>The multi-process test caught a stale cached file offset that made peers overwrite each
+          other's records — four producers writing 160 jobs produced 35. The compaction test caught
+          <code>os.open</code> defaulting to text mode on Windows, silently rewriting every
+          <code>0x0A</code> in a checksummed binary log.</p>
+          <p>Both were invisible to single-process happy-path testing. The 51-test queue suite passed
+          throughout.</p>
+          <a class="btn btn--ghost" href="#/design">Read the design notes</a>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Test file</th><th class="num">Tests</th><th>What it is for</th></tr></thead>
+            <tbody>
+              <tr><td>test_crash_recovery</td><td class="num">11</td><td>Hard kills, torn tails, bit flips</td></tr>
+              <tr><td>test_queue</td><td class="num">39</td><td>Leases, priorities, retries, DLQ, compaction</td></tr>
+              <tr><td>test_cli</td><td class="num">21</td><td>Every subcommand, in-process</td></tr>
+              <tr><td>test_codec</td><td class="num">17</td><td>Framing; flips every bit of a record</td></tr>
+              <tr><td>test_logfile</td><td class="num">14</td><td>Log mechanics, generation layout</td></tr>
+              <tr><td>test_concurrency</td><td class="num">8</td><td>Four separate OS processes racing</td></tr>
+              <tr><td>test_worker</td><td class="num">8</td><td>Outcomes, shutdown, heartbeat</td></tr>
+              <tr><td>test_backoff</td><td class="num">8</td><td>Delay policy</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="band band--tight">
+    <div class="container" style="text-align:center">
+      <h2 style="margin-bottom:12px">Crash it yourself.</h2>
+      <p style="max-width:60ch;margin:0 auto 26px;font-size:18px;color:var(--ink-2)">The playground
+      runs the same record format in your browser — real CRC-32, real byte offsets. Interrupt a
+      write mid-record and watch recovery find the tear.</p>
+      <a class="btn" href="./playground.html">Open the playground</a>
+    </div>
+  </div>
+</section>
+
+<!-- =========================== QUICKSTART =========================== -->
+<section class="page" id="p-start"><div class="doc"><div class="container"><div class="doc__grid">
+  <div>
+    <div class="eyebrow"><b>quickstart</b> ten minutes, from nothing</div>
+    <h1>Quickstart</h1>
+    <p class="doc__lede">Start here even if you have never used a job queue. Every step
+    below is runnable, and each one says what just happened.</p>
+
+    <h2 id="s-what">What this is for</h2>
+    <p>Some work should not happen while a user waits: sending an email, resizing a
+    photo, calling somebody else's API that is down half the time. So you <b>write the
+    work down</b> and answer immediately, and a second program picks it up and does it.</p>
+    <p>That written-down list is a <b>job queue</b>. The hard part is not the list — it
+    is what happens when a program dies holding a job, when the work fails, or when the
+    power goes. nobroker is that list, kept in a file, with those cases handled.</p>
+    <p>What makes it unusual: <b>there is no server to run.</b> Normally a queue means
+    installing Celery and operating a Redis box. Here there is a file, and nothing else.</p>
+
+    <h2 id="s-req">Step 1 — get it</h2>
+    <p>You need <b>Python 3.11 or newer</b>, and nothing else at all. Check what you have:</p>
+<pre><code>python --version
+<span class="tok-c"># Python 3.11.9   -- 3.11 or higher is fine</span></code></pre>
+    <p>Then pick whichever suits you:</p>
+<pre><code><span class="tok-c"># the normal way</span>
+pip install nobroker
+
+<span class="tok-c"># or, with no install at all: copy the folder into your project</span>
+cp -r src/nobroker /path/to/your/project/
+
+<span class="tok-c"># or run it as one file, no install, from anywhere</span>
+python make.py build
+python dist/nobroker.pyz --help</code></pre>
+    <div class="note note--good">
+      <h4>Why copying the folder is allowed</h4>
+      <p>nobroker imports nothing but the Python standard library, so there are no
+      dependencies to bring along. That is unusual, and it is the point of the project —
+      dropping the folder in works exactly as well as installing it.</p>
+    </div>
+
+    <h2 id="s-first">Step 2 — your first queue</h2>
+    <p>Save this as <code>first.py</code> and run it. It is complete: nothing is left
+    out, nothing needs to be running.</p>
+<pre><code><span class="tok-k">from</span> nobroker <span class="tok-k">import</span> Queue
+
+<span class="tok-c"># A queue is a directory. It is created if it does not exist.</span>
+q = Queue(<span class="tok-s">"./jobs"</span>)
+
+<span class="tok-c"># Write down some work. The payload is any JSON-able value -- nobroker</span>
+<span class="tok-c"># never looks inside it, it just keeps it safe and hands it back.</span>
+q.enqueue({<span class="tok-s">"send_email_to"</span>: <span class="tok-s">"ada@example.com"</span>})
+q.enqueue({<span class="tok-s">"send_email_to"</span>: <span class="tok-s">"grace@example.com"</span>})
+
+print(q.stats())
+q.close()</code></pre>
+<pre><code>$ python first.py
+QueueStats(ready=2, delayed=0, leased=0, done=0, dead=0, total=2)</code></pre>
+    <div class="note">
+      <h4>What just happened</h4>
+      <p>Two jobs are now <b>on disk</b>. Not "scheduled to be written" — actually on the
+      physical disk, because <code>enqueue()</code> does not return until the operating
+      system confirms it. Unplug the machine right now and both are still there.</p>
+      <p>Run the script again and you will see <code>total=4</code>: the queue picked up
+      where it left off, because the directory is the queue.</p>
+    </div>
+
+    <h2 id="s-do">Step 3 — actually do the work</h2>
+    <p>Now the other half: something that takes jobs off the list and runs them. Save
+    this as <code>work.py</code>.</p>
+<pre><code><span class="tok-k">from</span> nobroker <span class="tok-k">import</span> Queue, Worker
+
+q = Queue(<span class="tok-s">"./jobs"</span>)
+
+<span class="tok-k">def</span> handle(job):
+    <span class="tok-c"># Your code. Returning = success. Raising = failure, try again later.</span>
+    print(<span class="tok-s">"sending to"</span>, job.payload[<span class="tok-s">"send_email_to"</span>])
+
+<span class="tok-c"># idle_timeout=1 makes it exit once the queue has been empty for a second.</span>
+<span class="tok-c"># Leave it out and it runs forever, which is what you want in production.</span>
+Worker(q, handle, idle_timeout=<span class="tok-n">1</span>).run()</code></pre>
+<pre><code>$ python work.py
+sending to ada@example.com
+sending to grace@example.com</code></pre>
+    <p>Those two scripts are the whole idea. <code>first.py</code> is your web app;
+    <code>work.py</code> is your background worker. They are separate programs, they can
+    run on separate terminals at the same time, and <b>the only thing between them is the
+    <code>./jobs</code> directory</b>.</p>
+    <div class="note">
+      <h4>Try this</h4>
+      <p>Open two terminals. Run <code>work.py</code> without <code>idle_timeout</code>
+      in one, and <code>first.py</code> repeatedly in the other. The worker picks up new
+      jobs within about a tenth of a second. Now press Ctrl-C on the worker mid-run: it
+      finishes the job it is holding before exiting, and nothing is lost.</p>
+    </div>
+
+    <h2 id="s-fail">Step 4 — what happens when work fails</h2>
+    <p>This is the part you are really buying. Make the handler fail:</p>
+<pre><code><span class="tok-k">from</span> nobroker <span class="tok-k">import</span> Queue, Worker
+
+q = Queue(<span class="tok-s">"./jobs"</span>, max_attempts=<span class="tok-n">3</span>)   <span class="tok-c"># give up after 3 tries</span>
+q.enqueue({<span class="tok-s">"charge"</span>: <span class="tok-n">500</span>})
+
+<span class="tok-k">def</span> handle(job):
+    <span class="tok-k">raise</span> RuntimeError(<span class="tok-s">"the payment API is down"</span>)
+
+Worker(q, handle, idle_timeout=<span class="tok-n">1</span>).run()
+
+<span class="tok-k">for</span> job <span class="tok-k">in</span> q.dlq():                     <span class="tok-c"># the jobs it gave up on</span>
+    print(job.id, job.attempts, job.last_error)</code></pre>
+    <p>Nothing crashes and nothing is lost. The job is retried after 1 second, then 2,
+    then 4 — waiting longer each time, so a service that is already struggling is not
+    hammered. After three tries it is moved to the <b>dead-letter queue</b>: a holding
+    area for work that will not succeed, with the error text kept so a person can look at
+    it. Fix the bug, then put them all back with <code>q.requeue_dead()</code>.</p>
+    <div class="note note--warn">
+      <h4>The one rule you must know</h4>
+      <p><b>A job can run more than once.</b> If a worker sends the email and is killed
+      before it can record that it did, the job comes back and the email is sent twice.
+      No queue anywhere avoids this — see <a href="#/faq">Objections</a> for why.</p>
+      <p>So write handlers that are safe to run twice. Usually that means checking before
+      acting ("has order 42 already been charged?"), which is one <code>if</code>
+      statement and turns a rare duplicate into a non-event.</p>
+    </div>
+
+    <h2 id="s-disk">Step 5 — look at what is on disk</h2>
+    <p>There is no magic here, and you can check that:</p>
+<pre><code>$ ls jobs/
+default.000000.log   default.lock
+
+$ nobroker --dir ./jobs inspect
+   16  ENQUEUE  {"id": "a3f1...", "payload": {"send_email_to": "ada@..."}}
+  184  LEASE    {"id": "a3f1...", "deadline": 1735689630.2}
+  246  ACK      {"id": "a3f1...", "at": 1735689601.8}</code></pre>
+    <p>One file, appended to and never edited. Every line is a thing that happened, in
+    order. The queue's state is that file replayed from the top — which is why a crash
+    can only ever lose the record that was being written, and why you can read your own
+    queue with your eyes when something goes wrong at 3am.</p>
+
+    <h2 id="s-cli">Step 6 — from the terminal</h2>
+    <p>A queue you cannot inspect from a terminal is a queue you cannot operate. Every
+    command takes <code>--dir</code> to say which queue directory it means.</p>
+<pre><code>nobroker enqueue <span class="tok-s">'{"resize": "photo.jpg"}'</span> --priority <span class="tok-n">5</span>
+nobroker stats                  <span class="tok-c"># how many in each state</span>
+nobroker list --state ready     <span class="tok-c"># what is waiting</span>
+nobroker work myapp.tasks:handle --concurrency <span class="tok-n">4</span>   <span class="tok-c"># run a worker</span>
+nobroker dlq                    <span class="tok-c"># what failed, and why</span>
+nobroker dlq --requeue          <span class="tok-c"># after you fix the bug</span>
+nobroker inspect                <span class="tok-c"># the raw log, record by record</span>
+nobroker recover                <span class="tok-c"># report on torn-tail repair</span>
+nobroker compact                <span class="tok-c"># drop completed history, shrink the file</span></code></pre>
+    <p><code>nobroker work myapp.tasks:handle</code> is worth noticing: a worker is a
+    command, not a program you have to write. The argument is
+    <code>module:function</code>.</p>
+
+    <h2 id="s-next">Where to go next</h2>
+    <div class="cols cols--2">
+      <div class="card">
+        <h4>Learn the ideas</h4>
+        <p>The <a href="#/guide">Guide</a> covers leases, retries, priorities, several
+        workers at once, and compaction — in the order you meet them.</p>
+      </div>
+      <div class="card">
+        <h4>Look things up</h4>
+        <p>The <a href="#/api">API reference</a> lists every method, argument and default,
+        with an example for each group.</p>
+      </div>
+    </div>
+    <div class="note note--good">
+      <h4>Or try it with nothing installed</h4>
+      <p>The <a href="./playground.html">playground</a> runs the same state machine in
+      your browser. Enqueue jobs, let a lease expire, crash a write halfway through a
+      record, and watch recovery find the tear. It has a guided tour built in.</p>
+    </div>
+
+    <div class="note">
+      <h4>No <code>make</code>? (Windows)</h4>
+      <p>Every task also runs through <code>make.py</code>, which needs only Python:</p>
+<pre style="margin:12px 0 0"><code>python make.py demo         <span class="tok-c"># the end-to-end tour</span>
+python make.py test         <span class="tok-c"># the test suite</span>
+python make.py bench        <span class="tok-c"># throughput on your machine</span>
+python make.py check-deps   <span class="tok-c"># prove there are no dependencies</span></code></pre>
+    </div>
+  </div>
+  <aside class="toc">
+    <b>On this page</b>
+    <a href="#s-what">What this is for</a>
+    <a href="#s-req">1 · Get it</a>
+    <a href="#s-first">2 · Your first queue</a>
+    <a href="#s-do">3 · Do the work</a>
+    <a href="#s-fail">4 · When work fails</a>
+    <a href="#s-disk">5 · What is on disk</a>
+    <a href="#s-cli">6 · From the terminal</a>
+    <a href="#s-next">Where to go next</a>
+  </aside>
+</div></div></div></section>
+
+<!-- =========================== GUIDE =========================== -->
+<section class="page" id="p-guide"><div class="doc"><div class="container"><div class="doc__grid">
+  <div>
+    <div class="eyebrow"><b>guide</b> concepts, in the order you meet them</div>
+    <h1>Guide</h1>
+    <p class="doc__lede">Everything nobroker does, why each piece is shaped that way, and
+    what goes wrong if you set it badly. Read it in order the first time.</p>
+
+    <h2 id="g-words">The six words you need</h2>
+    <p>Every queue uses these, and they are the only vocabulary in this guide. If you
+    have read the <a href="#/start">Quickstart</a> you have already used four of them.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Word</th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td><b>job</b></td><td>One piece of work to do later, plus your data for it.</td></tr>
+          <tr><td><b>enqueue</b></td><td>Write a job down. Returns once it is safely on disk.</td></tr>
+          <tr><td><b>lease</b></td><td>Claim a job to work on — <em>without</em> removing it from the queue.</td></tr>
+          <tr><td><b>ack</b></td><td>"Finished it." Only now does the job leave the queue.</td></tr>
+          <tr><td><b>nack</b></td><td>"That failed." Put it back and try again after a wait.</td></tr>
+          <tr><td><b>DLQ</b></td><td>Dead-letter queue: where a job lands after failing too many times.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The one that is not obvious is <b>lease</b>, and it is the reason a queue is more
+    than a list. Keep reading.</p>
+
+    <h2 id="g-jobs">Jobs and payloads</h2>
+    <p>A job is your data — the <b>payload</b> — plus everything the queue knows about
+    how its delivery has gone: how many times it has been tried, when it may next run,
+    what went wrong last time. nobroker never looks inside the payload; it is yours.</p>
+<pre><code>job = q.enqueue(
+    {<span class="tok-s">"resize"</span>: <span class="tok-s">"photo.jpg"</span>, <span class="tok-s">"width"</span>: <span class="tok-n">1024</span>},
+    priority=<span class="tok-n">5</span>,          <span class="tok-c"># higher leases first; ties break FIFO</span>
+    delay=<span class="tok-n">30.0</span>,          <span class="tok-c"># not eligible for 30 seconds</span>
+    max_attempts=<span class="tok-n">3</span>,      <span class="tok-c"># then the dead-letter queue</span>
+    job_id=<span class="tok-s">"order-42"</span>,   <span class="tok-c"># optional: de-duplicates on this key</span>
+)</code></pre>
+    <p>Every argument above is optional; only the payload is required.</p>
+    <p>When <code>enqueue()</code> returns, the job is on disk — it fsyncs before returning.
+    Payloads must be JSON-serialisable: dicts, lists, strings, numbers, booleans,
+    <code>None</code>. No bytes, no class instances, no <code>datetime</code>. That is the
+    price of a log you can read with your own eyes when something has gone wrong.</p>
+    <div class="note">
+      <h4><code>job_id</code>: the argument worth knowing about</h4>
+      <p>Pass your own id and enqueueing twice with it creates <b>one</b> job:</p>
+<pre style="margin:12px 0 0"><code>q.enqueue({<span class="tok-s">"charge"</span>: <span class="tok-n">500</span>}, job_id=<span class="tok-s">"order-42"</span>)   <span class="tok-c"># creates it</span>
+q.enqueue({<span class="tok-s">"charge"</span>: <span class="tok-n">500</span>}, job_id=<span class="tok-s">"order-42"</span>)   <span class="tok-c"># does nothing</span></code></pre>
+      <p style="margin-top:12px">So a user double-clicking "Pay", or an HTTP request your
+      client retried, cannot schedule the work twice. Use a natural id from your own data
+      — an order number, a user id plus a date — rather than a random one.</p>
+    </div>
+
+    <h2 id="g-lease">Leases and the visibility timeout</h2>
+    <p><b>Why not just remove a job when a worker takes it?</b> Because then a worker that
+    dies mid-job takes the job with it. It is not in the queue, it was never finished, and
+    nobody knows it existed. That is the failure a queue is supposed to prevent.</p>
+    <p>So a worker <b>borrows</b> the job instead. Leasing it makes it invisible to every
+    other worker for <code>visibility_timeout</code> seconds, but it stays in the queue.
+    Ack within that window and it is done and removed. Fail to — because you crashed,
+    hung, or were killed — and the lease simply expires and the job becomes available to
+    somebody else.</p>
+    <p>Nothing has to detect the crash. There is no heartbeat and no health check: a lease
+    is a deadline written on the disk, and deadlines pass on their own.</p>
+<pre><code>jobs = q.lease(<span class="tok-n">10</span>, visibility_timeout=<span class="tok-n">60.0</span>)
+<span class="tok-k">for</span> job <span class="tok-k">in</span> jobs:
+    q.extend(job, <span class="tok-n">120.0</span>)   <span class="tok-c"># buy a slow handler more time</span>
+    q.ack(job)</code></pre>
+    <div class="note">
+      <h4>Choosing a visibility timeout</h4>
+      <p><b>Too short</b> and a handler that is merely slow gets its job handed to someone
+      else while it is still working — duplicate work from a perfectly healthy worker.
+      <b>Too long</b> and a job held by a crashed worker sits invisible for that long
+      before anyone retries it.</p>
+      <p>You do not have to choose. Keep it short (the 30-second default is fine) and use
+      <code>Worker</code>, whose heartbeat extends the lease of any handler still running.
+      Then short timeouts cost slow jobs nothing.</p>
+      <p>If you write your own loop instead, set it to a few times your slowest expected
+      handler, or call <code>q.extend(job, seconds)</code> as you go.</p>
+    </div>
+    <div class="note note--warn">
+      <h4>What if your lease expires and you ack anyway?</h4>
+      <p>You get <code>NotLeasedError</code> rather than silently completing a job someone
+      else is now running. Every lease carries a token; when the job is handed on, the
+      token changes, so a late ack is recognisable and refused. You <em>find out</em> that
+      your work was orphaned instead of quietly corrupting state.</p>
+    </div>
+
+    <h2 id="g-retry">Retries, backoff and the DLQ</h2>
+    <p>When a handler raises, the job is not lost and not immediately retried — it is put
+    back with a <b>delay that grows each time</b>: 1 second, then 2, then 4, then 8. That
+    is <b>exponential backoff</b>, and it exists because the usual cause of failure is
+    something else being unhealthy, and retrying instantly makes that worse.</p>
+    <p><b>Jitter</b> adds randomness to those delays. Without it, an outage that fails
+    10,000 jobs at once produces 10,000 retries at the same instant, then again at the
+    same instant, forever — the queue becomes a synchronised hammer aimed at the thing
+    that was already struggling.</p>
+    <p>After <code>max_attempts</code> tries the job stops retrying and moves to the
+    <b>dead-letter queue</b>: not deleted, just set aside with its error message so a
+    person can look. Attempts are counted <em>when a job is leased</em>, not when it
+    fails — so a worker that dies silently still burns an attempt, and a crash-looping
+    worker cannot retry one job forever.</p>
+<pre><code><span class="tok-k">from</span> nobroker <span class="tok-k">import</span> BackoffPolicy
+
+q = Queue(<span class="tok-s">"./jobs"</span>, backoff=BackoffPolicy(
+    base=<span class="tok-n">1.0</span>,        <span class="tok-c"># delay after the first failure</span>
+    factor=<span class="tok-n">2.0</span>,      <span class="tok-c"># doubling</span>
+    max_delay=<span class="tok-n">300</span>,   <span class="tok-c"># ceiling, so attempt 30 is not in 2089</span>
+    jitter=<span class="tok-n">0.5</span>,      <span class="tok-c"># half fixed, half random</span>
+))
+
+<span class="tok-k">for</span> job <span class="tok-k">in</span> q.dlq():
+    print(job.id, job.attempts, job.last_error)
+q.requeue_dead()      <span class="tok-c"># revive the whole DLQ after fixing the bug</span></code></pre>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Default</th><th>Raise it when…</th></tr></thead>
+        <tbody>
+          <tr><td><code>base</code></td><td>1.0 s</td><td>the thing you call needs longer than a second to recover</td></tr>
+          <tr><td><code>factor</code></td><td>2.0</td><td>rarely — 2.0 is the standard doubling</td></tr>
+          <tr><td><code>max_delay</code></td><td>300 s</td><td>a long outage is normal and you would rather wait than dead-letter</td></tr>
+          <tr><td><code>jitter</code></td><td>0.5</td><td>you have many jobs failing together; 1.0 spreads them furthest</td></tr>
+          <tr><td><code>max_attempts</code></td><td>5</td><td>failures are usually transient. Lower it when they usually are not</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note note--warn">
+      <h4>The limitation to know about</h4>
+      <p>nobroker has no "this will never work, skip the retries" call. A permanently bad
+      input is retried exactly like a service that is briefly down — it just takes
+      <code>max_attempts</code> tries to reach the DLQ instead of one. If that matters to
+      you, catch the permanent case in your handler and record it yourself rather than
+      raising.</p>
+    </div>
+
+    <h2 id="g-order">Priorities and delays</h2>
+    <p>Two ways to control <em>when</em> a job runs:</p>
+<pre><code>q.enqueue(payload, priority=<span class="tok-n">9</span>)   <span class="tok-c"># jumps the line; higher wins</span>
+q.enqueue(payload, delay=<span class="tok-n">300</span>)   <span class="tok-c"># not before five minutes from now</span></code></pre>
+    <p>Ordering is <code>(priority desc, available_at asc, insertion order)</code> — so
+    within one priority level it is first-in-first-out, and nothing overtakes unfairly.</p>
+    <p><b>Use priorities sparingly.</b> Two or three levels is plenty. There is no ageing,
+    which means a steady stream of priority-9 work will starve a priority-0 job
+    indefinitely — it never becomes more urgent by waiting.</p>
+    <div class="note">
+      <h4>Why a delayed job does not block the queue</h4>
+      <p>Eligible jobs and not-yet-eligible jobs are kept on <em>separate</em> heaps. Put
+      them together and a high-priority job scheduled for tomorrow sits at the head of the
+      queue, unrunnable, starving everything behind it — because you cannot look past the
+      front of a heap. Splitting them is what makes <code>priority</code> and
+      <code>delay</code> safe to combine.</p>
+    </div>
+
+    <h2 id="g-worker">Workers</h2>
+    <p><code>Worker</code> is the loop you would otherwise write yourself: lease a job,
+    run the handler, ack it if it returns, nack it if it raises, repeat. Use it unless you
+    have a reason not to — it gets three things right that hand-written loops usually
+    get wrong (see below).</p>
+<pre><code>stats = Worker(
+    q, handle,
+    concurrency=<span class="tok-n">4</span>,        <span class="tok-c"># threads — handlers here are usually I/O bound</span>
+    poll_interval=<span class="tok-n">0.1</span>,
+    max_jobs=<span class="tok-k">None</span>,        <span class="tok-c"># stop after N, for recycling workers</span>
+    idle_timeout=<span class="tok-k">None</span>,    <span class="tok-c"># stop after N idle seconds</span>
+).run()</code></pre>
+    <p>The three things it gets right:</p>
+    <p><b>1 · Ctrl-C does not lose work.</b> SIGINT and SIGTERM flip a flag; in-flight
+    handlers run to completion and ack normally, and only then does the process exit.
+    Killing a worker costs you nothing, which is what makes deploying boring.</p>
+    <p><b>2 · Slow handlers are not redelivered.</b> A background thread extends the lease
+    of anything still running, so you can keep the visibility timeout short without
+    punishing slow jobs.</p>
+    <p><b>3 · One bad job cannot take the worker down.</b> A raising handler is data, not
+    a crash; the job is nacked and the loop continues.</p>
+    <div class="note">
+      <h4>Threads or processes?</h4>
+      <p><code>concurrency=4</code> means four <em>threads</em>. That is right for the
+      handlers a queue usually runs — HTTP calls, sending mail, waiting on a database —
+      because Python releases the GIL while waiting on I/O.</p>
+      <p>If your handlers are CPU-bound (resizing images, crunching numbers), threads buy
+      you almost nothing. Run several worker <em>processes</em> instead — just start the
+      command more than once. nobroker is safe across processes, which is the whole
+      point.</p>
+    </div>
+    <p><code>run()</code> returns <code>WorkerStats</code>. The field to watch is
+    <code>lost_leases</code>: anything above zero means handlers are finishing after their
+    lease expired, so work is being done twice and your visibility timeout is too short.</p>
+
+    <h2 id="g-multi">Several workers at once</h2>
+    <p>Open the same directory from as many processes as you like, on the same machine.
+    Nothing coordinates them and no notification is sent; each process takes a kernel file
+    lock, reads forward from where it last got to, and finds out what everyone else did.
+    Two workers can never be handed the same job, because the lock makes the
+    read-decide-write sequence atomic.</p>
+<pre><code><span class="tok-c"># terminal 1, 2, 3 — all against the same directory</span>
+nobroker --dir ./jobs work myapp.tasks:handle</code></pre>
+    <div class="note note--warn">
+      <h4>One machine only</h4>
+      <p>This works because of a <em>kernel</em> file lock, which exists inside one
+      operating system. It does not work over a network drive — not NFS, not SMB, not a
+      shared cloud folder — and it cannot coordinate two machines. If you need work spread
+      across servers, you need a real broker; nobroker will not grow one.</p>
+    </div>
+
+    <h2 id="g-named">Named queues</h2>
+    <p>Use a second argument to keep different kinds of work apart. Each name is an
+    independent log with its own lock, so one directory holds <code>emails</code>,
+    <code>thumbnails</code> and <code>webhooks</code> side by side without contending —
+    and a flood of thumbnails cannot delay your password-reset mail.</p>
+<pre><code>emails = Queue(<span class="tok-s">"./jobs"</span>, <span class="tok-s">"emails"</span>)
+thumbs = Queue(<span class="tok-s">"./jobs"</span>, <span class="tok-s">"thumbnails"</span>)</code></pre>
+
+    <h2 id="g-compact">Compaction — keeping the file small</h2>
+    <p>The log is only ever appended to, so a queue that has processed a million jobs
+    holds a million records describing work that is finished and irrelevant. Nothing
+    removes them on its own.</p>
+    <p><b>Compaction</b> rewrites the log with only the jobs that still matter. Completed
+    jobs are dropped; the dead-letter queue is kept, because it is a record of what failed
+    rather than maintenance debris.</p>
+<pre><code>result = q.compact()
+print(result.describe())
+<span class="tok-c"># compacted 2652568 -&gt; 16 bytes (100.0% reclaimed), kept 0 jobs, dropped 5000 completed</span></code></pre>
+    <div class="note note--warn">
+      <h4>You have to run this yourself</h4>
+      <p>There is no automatic trigger — no size threshold, no background task. If you
+      never compact, the file grows forever, and because opening a queue replays the whole
+      log, startup gets slower and slower (roughly 48,000 records per second, so a
+      million-record log takes about 20 seconds to open).</p>
+      <p>Run <code>nobroker compact</code> from cron, or call <code>q.compact()</code>
+      somewhere in your own maintenance. It is safe at any time: it takes the same lock as
+      everything else, and other processes notice by comparing a number.</p>
+    </div>
+
+    <h2 id="g-together">Putting it together</h2>
+    <p>What this looks like in a real application. A web request writes the job down and
+    returns; a separate long-running process does the work.</p>
+<pre><code><span class="tok-c"># tasks.py -- shared by both sides</span>
+<span class="tok-k">from</span> nobroker <span class="tok-k">import</span> Queue
+
+<span class="tok-k">def</span> queue():
+    <span class="tok-k">return</span> Queue(<span class="tok-s">"/var/lib/myapp/jobs"</span>, <span class="tok-s">"emails"</span>, max_attempts=<span class="tok-n">5</span>)
+
+<span class="tok-k">def</span> send_welcome(job):
+    user_id = job.payload[<span class="tok-s">"user_id"</span>]
+    <span class="tok-k">if</span> already_sent(user_id):        <span class="tok-c"># the idempotency check</span>
+        <span class="tok-k">return</span>                       <span class="tok-c"># returning = done, no duplicate</span>
+    mailer.send_welcome(user_id)
+    mark_sent(user_id)</code></pre>
+<pre><code><span class="tok-c"># in your web app -- fast, and durable before it answers</span>
+<span class="tok-k">def</span> signup(request):
+    user = create_user(request)
+    tasks.queue().enqueue(
+        {<span class="tok-s">"user_id"</span>: user.id},
+        job_id=<span class="tok-s">f"welcome-{user.id}"</span>,   <span class="tok-c"># cannot be scheduled twice</span>
+    )
+    <span class="tok-k">return</span> redirect(<span class="tok-s">"/welcome"</span>)</code></pre>
+<pre><code><span class="tok-c"># the worker, as a service -- systemd, a container, or just a terminal</span>
+nobroker --dir /var/lib/myapp/jobs -q emails work tasks:send_welcome -c 4</code></pre>
+    <p>Note the two halves of the duplicate problem being handled in the two places they
+    belong: <code>job_id</code> stops the same work being <em>scheduled</em> twice, and the
+    <code>already_sent</code> check stops it being <em>performed</em> twice.</p>
+
+    <h2 id="g-mistakes">Common mistakes</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Mistake</th><th>What happens</th><th>Do this instead</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Handler that is not safe to run twice</td>
+            <td>A crash between doing the work and recording it sends the email twice</td>
+            <td>Check before acting, or key on <code>job.id</code></td>
+          </tr>
+          <tr>
+            <td>Visibility timeout shorter than the handler</td>
+            <td>Healthy workers duplicate each other's work</td>
+            <td>Use <code>Worker</code>, or call <code>extend()</code></td>
+          </tr>
+          <tr>
+            <td>Never compacting</td>
+            <td>The file grows forever and startup gets slow</td>
+            <td><code>nobroker compact</code> on a schedule</td>
+          </tr>
+          <tr>
+            <td>Putting the queue on a network drive</td>
+            <td>The lock does not hold; two workers take one job</td>
+            <td>Keep it on local disk</td>
+          </tr>
+          <tr>
+            <td>Non-JSON payloads (objects, bytes, <code>datetime</code>)</td>
+            <td><code>SerializationError</code> at enqueue</td>
+            <td>Store an id and look the object up in the handler</td>
+          </tr>
+          <tr>
+            <td>Huge payloads</td>
+            <td>The log balloons; over 8&nbsp;MiB it is refused</td>
+            <td>Store a file path or a row id, not the contents</td>
+          </tr>
+          <tr>
+            <td><code>fsync=False</code> in production</td>
+            <td>A power cut loses jobs you were told were saved</td>
+            <td>Leave it on; use <code>enqueue_many</code> for speed</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <aside class="toc">
+    <b>On this page</b>
+    <a href="#g-words">The six words</a>
+    <a href="#g-jobs">Jobs and payloads</a>
+    <a href="#g-lease">Leases</a>
+    <a href="#g-retry">Retries and the DLQ</a>
+    <a href="#g-order">Priorities and delays</a>
+    <a href="#g-worker">Workers</a>
+    <a href="#g-multi">Several workers</a>
+    <a href="#g-named">Named queues</a>
+    <a href="#g-compact">Compaction</a>
+    <a href="#g-together">Putting it together</a>
+    <a href="#g-mistakes">Common mistakes</a>
+  </aside>
+</div></div></div></section>
+
+<!-- =========================== API =========================== -->
+<section class="page" id="p-api"><div class="doc"><div class="container"><div class="doc__grid">
+  <div>
+    <div class="eyebrow"><b>reference</b> the whole surface</div>
+    <h1>API reference</h1>
+    <p class="doc__lede">Nine public names, every argument, and what each one is for.
+    New to this? Read the <a href="#/start">Quickstart</a> first — this page assumes you
+    know what a lease is.</p>
+
+    <h2 id="a-which">Which method do I want?</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>I want to…</th><th>Call</th></tr></thead>
+        <tbody>
+          <tr><td>add one job</td><td><code>enqueue(payload)</code></td></tr>
+          <tr><td>add a lot of jobs quickly</td><td><code>enqueue_many(payloads)</code></td></tr>
+          <tr><td>add a job only once, ever</td><td><code>enqueue(payload, job_id="…")</code></td></tr>
+          <tr><td>run jobs, and not write the loop</td><td><code>Worker(q, handler).run()</code></td></tr>
+          <tr><td>take one job myself</td><td><code>lease_one()</code></td></tr>
+          <tr><td>say a job succeeded</td><td><code>ack(job)</code></td></tr>
+          <tr><td>say a job failed</td><td><code>nack(job, error="…")</code></td></tr>
+          <tr><td>buy a slow handler more time</td><td><code>extend(job, seconds)</code></td></tr>
+          <tr><td>see what failed permanently</td><td><code>dlq()</code></td></tr>
+          <tr><td>retry everything that failed</td><td><code>requeue_dead()</code></td></tr>
+          <tr><td>count what is where</td><td><code>stats()</code></td></tr>
+          <tr><td>shrink the file</td><td><code>compact()</code></td></tr>
+          <tr><td>throw it all away</td><td><code>purge()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="a-queue">Queue</h2>
+<pre><code>Queue(path, name=<span class="tok-s">"default"</span>, *, fsync=<span class="tok-k">True</span>,
+      visibility_timeout=<span class="tok-n">30.0</span>, max_attempts=<span class="tok-n">5</span>,
+      backoff=BackoffPolicy(), lock_timeout=<span class="tok-n">10.0</span>)</code></pre>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Argument</th><th>Default</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>path</code></td><td>—</td><td>The directory holding the queue's files. Created if missing. Must be on a local disk.</td></tr>
+          <tr><td><code>name</code></td><td><code>"default"</code></td><td>Which queue in that directory. Each name is fully independent, with its own log and lock.</td></tr>
+          <tr><td><code>fsync</code></td><td><code>True</code></td><td>Force each write to the physical disk before returning. Turning it off is ~4× faster and gives up the guarantee.</td></tr>
+          <tr><td><code>visibility_timeout</code></td><td><code>30.0</code></td><td>Seconds a leased job stays hidden. When it passes, the job is available again.</td></tr>
+          <tr><td><code>max_attempts</code></td><td><code>5</code></td><td>Tries before a job goes to the dead-letter queue. Stamped on each job at enqueue.</td></tr>
+          <tr><td><code>backoff</code></td><td><code>BackoffPolicy()</code></td><td>How long to wait between retries.</td></tr>
+          <tr><td><code>lock_timeout</code></td><td><code>10.0</code></td><td>Seconds to wait for the file lock before raising <code>LockTimeoutError</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note note--warn">
+      <h4><code>fsync=False</code></h4>
+      <p>It makes writes about four times faster and <b>gives up the central guarantee</b>:
+      a machine crash can then lose work you were told was saved. It exists for benchmarks
+      and for caches where loss is acceptable. If you want speed <em>and</em> durability,
+      use <code>enqueue_many</code> — one fsync covers the whole batch, which is 40× faster
+      per job with the guarantee intact.</p>
+    </div>
+
+    <h3>Adding work</h3>
+<pre><code>enqueue(payload, *, priority=<span class="tok-n">0</span>, delay=<span class="tok-n">0.0</span>,
+        max_attempts=<span class="tok-k">None</span>, job_id=<span class="tok-k">None</span>) -&gt; Job
+enqueue_many(payloads, *, priority=<span class="tok-n">0</span>, delay=<span class="tok-n">0.0</span>, …) -&gt; list[Job]</code></pre>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>payload</code></td><td>Any JSON-serialisable value. Returned to your handler untouched.</td></tr>
+          <tr><td><code>priority</code></td><td>Higher runs first. Ties break first-in-first-out.</td></tr>
+          <tr><td><code>delay</code></td><td>Seconds before it may run at all.</td></tr>
+          <tr><td><code>max_attempts</code></td><td>Overrides the queue default for this job only.</td></tr>
+          <tr><td><code>job_id</code></td><td>Your own id. Enqueueing twice with the same one creates one job and returns the existing one.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Both fsync before returning. Raises <code>SerializationError</code> if the payload
+    is not JSON-serialisable or exceeds 8&nbsp;MiB.</p>
+
+    <h3>Taking and finishing work</h3>
+<pre><code>lease(count=<span class="tok-n">1</span>, *, visibility_timeout=<span class="tok-k">None</span>) -&gt; list[Job]
+lease_one(*, visibility_timeout=<span class="tok-k">None</span>)      -&gt; Job | <span class="tok-k">None</span>
+ack(job)                                    <span class="tok-c"># -&gt; None</span>
+nack(job, *, error=<span class="tok-k">None</span>, delay=<span class="tok-k">None</span>)     -&gt; Job
+extend(job, seconds)                        -&gt; Job</code></pre>
+<pre><code>job = q.lease_one()
+<span class="tok-k">if</span> job <span class="tok-k">is</span> <span class="tok-k">not</span> <span class="tok-k">None</span>:
+    <span class="tok-k">try</span>:
+        do_the_work(job.payload)
+        q.ack(job)                             <span class="tok-c"># done, remove it</span>
+    <span class="tok-k">except</span> Exception <span class="tok-k">as</span> exc:
+        q.nack(job, error=str(exc))            <span class="tok-c"># retry, or DLQ if out of tries</span></code></pre>
+    <div class="tablewrap">
+      <table>
+        <tbody>
+          <tr><td><code>lease</code></td><td>Never blocks. Returns fewer than <code>count</code> — possibly none — if that is all there is.</td></tr>
+          <tr><td><code>ack</code></td><td>Acking an already-acked job is <em>not</em> an error. Raises <code>NotLeasedError</code> if your lease expired and the job moved on.</td></tr>
+          <tr><td><code>nack</code></td><td>Returns the job in its new state — check <code>.state is JobState.DEAD</code> to see whether this was the failure that killed it. <code>delay=</code> overrides the computed backoff.</td></tr>
+          <tr><td><code>extend</code></td><td>Pushes the deadline out for a handler still working. <code>Worker</code> does this for you.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Looking and maintaining</h3>
+<pre><code>get(job_id)                         -&gt; Job
+stats()                             -&gt; QueueStats
+list_jobs(state=<span class="tok-k">None</span>, *, limit=<span class="tok-k">None</span>) -&gt; list[Job]
+dlq(*, limit=<span class="tok-k">None</span>)                  -&gt; list[Job]
+requeue_dead(job_id=<span class="tok-k">None</span>)           -&gt; int
+purge()                             -&gt; int
+compact()                           -&gt; CompactionResult
+close()                             <span class="tok-c"># or use `with Queue(...) as q:`</span></code></pre>
+<pre><code>print(q.stats())
+<span class="tok-c"># QueueStats(ready=3, delayed=1, leased=2, done=41, dead=1, total=48)</span>
+
+<span class="tok-k">for</span> job <span class="tok-k">in</span> q.dlq():
+    print(job.id, job.attempts, job.last_error)
+
+q.requeue_dead()          <span class="tok-c"># all of them back to ready, attempts reset</span>
+q.requeue_dead(<span class="tok-s">"order-42"</span>)  <span class="tok-c"># or just one</span></code></pre>
+    <p><code>stats()</code> counts by walking every job, so it is O(n) — fine to poll
+    every second, not fine to call in a tight loop over a million jobs.
+    <code>purge()</code> deletes everything, including jobs a worker is holding right now.</p>
+
+    <h2 id="a-job">Job</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>id</td><td>str</td><td>unique; yours if you supplied one</td></tr>
+          <tr><td>payload</td><td>Any</td><td>whatever you enqueued</td></tr>
+          <tr><td>state</td><td>JobState</td><td>ready · leased · done · dead</td></tr>
+          <tr><td>priority</td><td>int</td><td>higher leases first</td></tr>
+          <tr><td>attempts</td><td>int</td><td>counted on lease, not completion</td></tr>
+          <tr><td>max_attempts</td><td>int</td><td>then the DLQ</td></tr>
+          <tr><td>available_at</td><td>float</td><td>not leasable before this</td></tr>
+          <tr><td>lease_deadline</td><td>float | None</td><td>when the lease expires</td></tr>
+          <tr><td>lease_token</td><td>str | None</td><td>the fencing token</td></tr>
+          <tr><td>last_error</td><td>str | None</td><td>from the most recent nack</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>DELAYED</code> is deliberately not a state. A delayed job is <code>READY</code> with
+    <code>available_at</code> in the future — one less state to keep consistent, and eligibility
+    stays a pure function of the clock.</p>
+
+    <h2 id="a-worker">Worker</h2>
+<pre><code>Worker(queue, handler, *, concurrency=<span class="tok-n">1</span>, poll_interval=<span class="tok-n">0.1</span>,
+       max_jobs=<span class="tok-k">None</span>, idle_timeout=<span class="tok-k">None</span>, handle_signals=<span class="tok-k">True</span>).run()</code></pre>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Argument</th><th>Default</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>handler</code></td><td>—</td><td>Any callable taking one <code>Job</code>. Returning acks it; raising nacks it. The return value is ignored.</td></tr>
+          <tr><td><code>concurrency</code></td><td><code>1</code></td><td>How many threads run handlers. Right for I/O-bound work; for CPU-bound work run more processes instead.</td></tr>
+          <tr><td><code>poll_interval</code></td><td><code>0.1</code></td><td>Seconds to wait before asking again when the queue is empty. There is no server to push, so workers poll.</td></tr>
+          <tr><td><code>max_jobs</code></td><td><code>None</code></td><td>Stop after this many jobs. Useful for recycling long-lived workers.</td></tr>
+          <tr><td><code>idle_timeout</code></td><td><code>None</code></td><td>Stop after this many seconds with nothing to do. <code>None</code> means run forever; <code>0</code> means stop as soon as the queue is empty.</td></tr>
+          <tr><td><code>handle_signals</code></td><td><code>True</code></td><td>Catch SIGINT/SIGTERM for graceful shutdown. Set <code>False</code> when running a worker inside a thread.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>run()</code> blocks until stopped and returns
+    <code>WorkerStats(leased, succeeded, failed, dead, lost_leases)</code>. Call
+    <code>worker.stop()</code> from another thread for a clean shutdown.</p>
+    <div class="note">
+      <h4>The number to watch</h4>
+      <p><code>lost_leases</code> counts handlers that finished <em>after</em> their lease
+      expired. Anything above zero means work is being done twice: raise
+      <code>visibility_timeout</code>, or find out why those handlers got so slow.</p>
+    </div>
+
+    <h2 id="a-backoff">BackoffPolicy</h2>
+<pre><code>BackoffPolicy(base=<span class="tok-n">1.0</span>, factor=<span class="tok-n">2.0</span>, max_delay=<span class="tok-n">300.0</span>, jitter=<span class="tok-n">0.5</span>)</code></pre>
+    <p>How long a failed job waits before coming back. The delay for attempt <em>n</em> is
+    <code>base × factor<sup>n-1</sup></code>, capped at <code>max_delay</code>, then
+    randomised by <code>jitter</code>.</p>
+    <div class="tablewrap">
+      <table>
+        <tbody>
+          <tr><td><code>jitter=0.0</code></td><td>No randomness. Predictable, and useful in tests.</td></tr>
+          <tr><td><code>jitter=0.5</code></td><td>Half fixed, half random — the default.</td></tr>
+          <tr><td><code>jitter=1.0</code></td><td>Anywhere from zero to the full delay. Spreads a large failure furthest.</td></tr>
+        </tbody>
+      </table>
+    </div>
+<pre><code><span class="tok-k">from</span> nobroker <span class="tok-k">import</span> BackoffPolicy, Queue
+
+q = Queue(<span class="tok-s">"./jobs"</span>, backoff=BackoffPolicy(base=<span class="tok-n">5.0</span>, max_delay=<span class="tok-n">3600</span>))
+<span class="tok-c"># waits ~5s, 10s, 20s, 40s ... up to an hour</span></code></pre>
+
+    <h2 id="a-errors">Errors</h2>
+    <p>All derive from <code>NobrokerError</code>, so
+    <code>except NobrokerError</code> catches anything the queue can raise without
+    swallowing bugs in your own code.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Error</th><th>Means</th><th>Usually you should</th></tr></thead>
+        <tbody>
+          <tr><td>NotLeasedError</td><td>Your lease expired and the job went to someone else</td><td>Stop; the other worker owns it now</td></tr>
+          <tr><td>JobNotFoundError</td><td>No job with that id — normally because it was purged</td><td>Ignore it</td></tr>
+          <tr><td>LockTimeoutError</td><td>Could not get the file lock within <code>lock_timeout</code></td><td>Retry, or raise the timeout</td></tr>
+          <tr><td>SerializationError</td><td>The payload is not JSON-serialisable, or is over 8&nbsp;MiB</td><td>Store an id instead of the object</td></tr>
+          <tr><td>CorruptLogError</td><td>Damage recovery cannot resolve: a bad header, or a format version this build does not know</td><td>Investigate — this is not routine</td></tr>
+          <tr><td>CompactionError</td><td>Compaction failed; the previous log is untouched and still usable</td><td>Carry on; try again later</td></tr>
+          <tr><td>QueueClosedError</td><td>You used a queue after <code>close()</code></td><td>Fix the lifetime</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>A torn tail from a crash is <em>not</em> an error — it is repaired on open and
+    reported through <code>q.recovery</code>, which has a <code>.describe()</code> worth
+    logging at startup.</p>
+  </div>
+  <aside class="toc">
+    <b>On this page</b>
+    <a href="#a-which">Which method?</a>
+    <a href="#a-queue">Queue</a>
+    <a href="#a-job">Job</a>
+    <a href="#a-worker">Worker</a>
+    <a href="#a-backoff">BackoffPolicy</a>
+    <a href="#a-errors">Errors</a>
+  </aside>
+</div></div></div></section>
+
+<!-- =========================== DESIGN =========================== -->
+<section class="page" id="p-design"><div class="doc"><div class="container"><div class="doc__grid">
+  <div>
+    <div class="eyebrow"><b>internals</b> how it is built and what it cost</div>
+    <h1>Design notes</h1>
+    <p class="doc__lede">The decisions, the measurements, and the three bugs worth writing down.</p>
+
+    <h2 id="d-disk">On disk</h2>
+<pre><code>jobs/
+  emails.000001.log     <span class="tok-c"># the write-ahead log — the only durable state</span>
+  emails.current        <span class="tok-c"># one line: which generation is authoritative</span>
+  emails.lock           <span class="tok-c"># the cross-process lock</span></code></pre>
+    <p>Everything in memory — the priority heaps, the lease table, the DLQ — is a <em>cache</em> of
+    the log. There is no second source of truth to keep consistent with it, which is what makes crash
+    recovery tractable rather than hopeful.</p>
+
+    <h2 id="d-pure">Replay is a pure function of the log</h2>
+    <p>Nothing in the replay path reads the clock, mints a UUID, or samples jitter. Every
+    non-deterministic value — the lease deadline, the jittered retry time, the job id — is decided
+    <em>once</em> by the writer and recorded as an absolute value. Replaying a log twice therefore
+    produces identical state, which is the property that makes the exhaustive truncation test
+    possible at all.</p>
+
+    <h2 id="d-compact">Compaction without overwriting</h2>
+    <figure class="rv">
+      <svg viewBox="0 0 900 216" role="img" aria-label="Compaction writes a new generation file, fsyncs it, then atomically replaces the one-line pointer file. Before the flip the old generation is authoritative; after it, the new one.">
+        <defs>
+          <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <text class="svg-lbl svg-lbl--sm" x="0" y="14">BEFORE THE FLIP</text>
+        <rect class="svg-box" x="0" y="28" width="170" height="44" rx="2"/>
+        <text class="svg-lbl" x="85" y="48" text-anchor="middle">emails.000001.log</text>
+        <text class="svg-lbl svg-lbl--sm" x="85" y="64" text-anchor="middle">2.6 MB, authoritative</text>
+
+        <rect class="svg-box--hot" x="0" y="96" width="170" height="44" rx="2"/>
+        <text class="svg-lbl svg-hot" x="85" y="116" text-anchor="middle">emails.000002.log</text>
+        <text class="svg-lbl svg-lbl--sm" x="85" y="132" text-anchor="middle">written + fsynced, inert</text>
+
+        <rect class="svg-box--good" x="0" y="164" width="170" height="38" rx="2"/>
+        <text class="svg-lbl svg-good" x="85" y="188" text-anchor="middle">emails.current → 1</text>
+
+        <path class="svg-line" d="M200,115 H316" marker-end="url(#ar4)"/>
+        <text class="svg-lbl svg-lbl--sm" x="258" y="106" text-anchor="middle">os.replace</text>
+        <text class="svg-lbl svg-lbl--sm" x="258" y="132" text-anchor="middle">one atomic write</text>
+
+        <text class="svg-lbl svg-lbl--sm" x="346" y="14">AFTER THE FLIP</text>
+        <rect class="svg-box" x="346" y="28" width="170" height="44" rx="2" opacity=".45"/>
+        <text class="svg-lbl svg-dim" x="431" y="48" text-anchor="middle">emails.000001.log</text>
+        <text class="svg-lbl svg-lbl--sm" x="431" y="64" text-anchor="middle">orphan, swept later</text>
+
+        <rect class="svg-box--good" x="346" y="96" width="170" height="44" rx="2"/>
+        <text class="svg-lbl svg-good" x="431" y="116" text-anchor="middle">emails.000002.log</text>
+        <text class="svg-lbl svg-lbl--sm" x="431" y="132" text-anchor="middle">16 KB, authoritative</text>
+
+        <rect class="svg-box--good" x="346" y="164" width="170" height="38" rx="2"/>
+        <text class="svg-lbl svg-good" x="431" y="188" text-anchor="middle">emails.current → 2</text>
+
+        <line class="svg-line--ghost" x1="560" y1="10" x2="560" y2="206"/>
+        <text class="svg-lbl" x="590" y="52">The pointer file is the commit point.</text>
+        <text class="svg-lbl svg-lbl--sm" x="590" y="76">Nobody ever holds it open, so replacing it is</text>
+        <text class="svg-lbl svg-lbl--sm" x="590" y="94">always permitted — on every platform.</text>
+        <text class="svg-lbl svg-lbl--sm" x="590" y="126">Crash before it: the old log is still live and</text>
+        <text class="svg-lbl svg-lbl--sm" x="590" y="144">the new file is ignorable garbage.</text>
+        <text class="svg-lbl svg-lbl--sm" x="590" y="170">Crash after it: the new log is live and</text>
+        <text class="svg-lbl svg-lbl--sm" x="590" y="188">complete. There is no third state.</text>
+      </svg>
+      <figcaption>Peers notice a compaction by comparing an integer, not by stat'ing inodes with a
+      platform-specific fallback. This design was forced by a Windows bug and turned out better than
+      what it replaced.</figcaption>
+    </figure>
+
+    <h2 id="d-bench">Benchmarks</h2>
+    <p>Windows 11, NVMe SSD, Python 3.11.9, via <code>make bench</code>. Run it on your own hardware
+    — NVMe versus spinning rust changes the fsync rows by orders of magnitude.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Operation</th><th class="num">ops/sec</th><th class="num">µs/op</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>enqueue (fsync per job)</td><td class="num">1,348</td><td class="num">741.7</td><td>the guarantee, paid one job at a time</td></tr>
+          <tr><td>enqueue_many (one fsync)</td><td class="num">57,676</td><td class="num">17.3</td><td>batching amortises the fsync</td></tr>
+          <tr><td>enqueue (fsync=False)</td><td class="num">6,014</td><td class="num">166.3</td><td><em>not durable</em> — shown for contrast</td></tr>
+          <tr><td>lease+ack round trip</td><td class="num">1,433</td><td class="num">697.9</td><td>batches of 100, acked individually</td></tr>
+          <tr><td>cold-start replay</td><td class="num">47,732</td><td class="num">21.0</td><td>full replay, CRC of every record</td></tr>
+          <tr><td>compact</td><td class="num">537,184</td><td class="num">1.9</td><td>2.6 MB → 16 bytes</td></tr>
+          <tr><td>nack + reschedule</td><td class="num">6,712</td><td class="num">149.0</td><td>backoff, availability, re-heap</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="d-bugs">Three bugs worth writing down</h2>
+    <h3>Peers overwrote each other's records</h3>
+    <p>First run of the multi-process test: four producers × 40 jobs produced <strong>35 jobs, not
+    160</strong>. Four consumers leased <strong>615 jobs from a queue of 200</strong>. The append
+    offset was a per-process cache that the read path never refreshed, so a peer appended on top of
+    another's records. Invisible to every single-process test.</p>
+
+    <h3><code>os.open</code> defaults to text mode on Windows</h3>
+    <p>Compaction failed roughly one run in six, losing a varying number of jobs with a checksum
+    error in a file it had just written and fsynced. A descriptor without <code>O_BINARY</code>
+    silently rewrites every <code>0x0A</code> as <code>0x0D 0x0A</code>. JSON escapes newlines in
+    payloads, so it only fired when a record's <em>binary length or CRC field</em> happened to
+    contain one — hence intermittent, and hence surfacing at reopen rather than at write.</p>
+
+    <h3>Compaction left stale state in memory</h3>
+    <p>The heaps were rebuilt but the job table was not, so memory held jobs the log no longer
+    mentioned. The disagreement would have vanished on the next restart — correct after a reboot,
+    wrong until then, which is the worst failure shape there is.</p>
+
+    <h2 id="d-limits">Limits</h2>
+    <ul>
+      <li><strong>Single machine only.</strong> Kernel file locks do not work over NFS or SMB and will not coordinate two hosts.</li>
+      <li><strong>At-least-once, never exactly-once.</strong> Handlers must be idempotent.</li>
+      <li><strong>Polling, not push.</strong> A broker-less queue has nobody to send a notification. Cheap, but not free and not zero-latency.</li>
+      <li><strong>The whole index lives in memory.</strong> ~500 bytes per job, so a million jobs is ~500 MB.</li>
+      <li><strong><code>stats()</code> is O(n).</strong> It counts by iterating.</li>
+      <li><strong>Startup replays the whole log</strong> at ~48k records/sec. Compact regularly.</li>
+      <li><strong>No result backend, chaining, workflows, cron DSL, or async handlers.</strong> Deliberately out of scope.</li>
+      <li><strong>Payloads must be JSON-serialisable.</strong> The price of a readable log.</li>
+      <li><strong>Windows:</strong> directory <code>fsync</code> does not exist, so rename durability is weaker than on POSIX.</li>
+      <li><strong>Clock-dependent.</strong> A large backwards clock step can delay lease reclaims by that amount.</li>
+    </ul>
+  </div>
+  <aside class="toc">
+    <b>On this page</b>
+    <a href="#d-disk">On disk</a>
+    <a href="#d-pure">Pure replay</a>
+    <a href="#d-compact">Compaction</a>
+    <a href="#d-bench">Benchmarks</a>
+    <a href="#d-bugs">Three bugs</a>
+    <a href="#d-limits">Limits</a>
+  </aside>
+</div></div></div></section>
+
+<!-- =========================== FAQ =========================== -->
+<section class="page" id="p-faq"><div class="doc"><div class="container"><div class="doc__grid">
+  <div>
+    <div class="eyebrow"><b>objections</b> the questions a reviewer asks</div>
+    <h1>Objections</h1>
+    <p class="doc__lede">Answered before you have to ask them.</p>
+
+    <h2 id="f-sqlite">"Why not just use <code>sqlite3</code>? It's stdlib too."</h2>
+    <p>SQLite would give storage and transactions. It would not give any of the things this project
+    actually <em>is</em>: lease semantics, visibility timeouts, backoff with jitter, fencing tokens,
+    a dead-letter queue, or priority ordering with delayed jobs.</p>
+    <p>A job queue on SQLite is all of this same code written on top of a query layer you do not
+    need, plus a schema, plus the <code>BEGIN IMMEDIATE</code>/<code>busy_timeout</code> dance to
+    stop polling workers livelocking. More code, not less.</p>
+    <div class="note">
+      <h4>The honest counterpoint</h4>
+      <p>SQLite's storage engine is vastly better tested than this one. If you need a queue you would
+      bet a company on today, that is a real argument for it.</p>
+    </div>
+
+    <h2 id="f-once">"Why not exactly-once?"</h2>
+    <p>Because nobody delivers it. A worker can complete its side effect and then die before
+    acknowledging; the job comes back and the side effect happens twice. Closing that window requires
+    the handler's side effect and the queue's acknowledgement to commit in a <em>single
+    transaction</em> — which means the queue must live inside your database, and then it is not a
+    general-purpose queue any more.</p>
+
+    <h2 id="f-redis">"Is it faster than Redis?"</h2>
+    <p><strong>No.</strong> Redis will do 50,000–100,000 ops/sec on loopback. nobroker does ~1,300
+    durable enqueues/sec, because it calls <code>fsync</code> and Redis by default does not. That is
+    not a fair fight in either direction — nobroker is paying for a guarantee Redis is not making.</p>
+    <ul>
+      <li><strong>vs Redis with <code>appendfsync always</code></strong> — the same promise — you are in the same order of magnitude, minus a network hop and a server.</li>
+      <li><strong>vs Redis default</strong> (<code>everysec</code>, can lose a second of acknowledged writes) — the comparable setting is <code>fsync=False</code>, labelled "not durable" everywhere it appears.</li>
+      <li><strong>On batches</strong>, <code>enqueue_many</code> does 57k/sec durably.</li>
+    </ul>
+    <p>If you need 100k jobs/sec, run a broker. If you need 1,000 jobs/sec that are still there after
+    the power cut, this is simpler and there is nothing to operate.</p>
+
+    <h2 id="f-lock">"Isn't a file lock per operation slow?"</h2>
+    <p>It was — 44% of a non-durable enqueue, spent opening and closing the lock file. The descriptor
+    is now held for the queue's lifetime and only the lock is taken and released, which was a 2.4×
+    improvement with no semantic change. Both <code>flock</code> and <code>msvcrt.locking</code>
+    associate the lock with the open file <em>description</em>, so it is exactly as exclusive as
+    reopening each time.</p>
+
+    <h2 id="f-compact">"What if two processes compact at once?"</h2>
+    <p>They cannot. Compaction runs inside the same lock as every other operation.</p>
+
+    <h2 id="f-crash">"What if the machine dies during compaction?"</h2>
+    <p>The pointer file either got flipped or it did not. If it did, the new generation is live and
+    complete. If it did not, the old one is still live and untouched, and the half-written new
+    generation is inert garbage that the next compaction overwrites.</p>
+  </div>
+  <aside class="toc">
+    <b>On this page</b>
+    <a href="#f-sqlite">Why not sqlite3</a>
+    <a href="#f-once">Why not exactly-once</a>
+    <a href="#f-redis">Faster than Redis?</a>
+    <a href="#f-lock">Lock overhead</a>
+    <a href="#f-compact">Concurrent compaction</a>
+    <a href="#f-crash">Crash during compaction</a>
+  </aside>
+</div></div></div></section>
+
+</main>
+
+<footer class="foot"><div class="container"><div class="foot__in">
+  <div>nobroker · MIT · originally built for Zero Dependency Hackathon</div>
+  <div><a href="#/start">Quickstart</a> · <a href="#/design">Design</a> · <a href="./playground.html">Playground</a> </div> 
+  <!-- · <a href="./assets/">Brand assets</a> -->
+</div></div></footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var root = document.documentElement;
+
+  /* Theme toggle. The label names the theme you get by pressing it, not the
+     one you are in -- a button says what it does. One word is ambiguous on
+     its own, so the accessible name spells the action out in full. */
+  var themeBtn = document.getElementById("themetoggle");
+  var themeMedia = matchMedia("(prefers-color-scheme: dark)");
+  function isDark(){
+    var set = root.getAttribute("data-theme");
+    return set ? set === "dark" : themeMedia.matches;
+  }
+  function syncThemeLabel(){
+    var next = isDark() ? "Light" : "Dark";
+    themeBtn.textContent = next;
+    themeBtn.title = "Switch to " + next.toLowerCase() + " theme";
+    themeBtn.setAttribute("aria-label", themeBtn.title);
+  }
+  themeBtn.addEventListener("click", function(){
+    root.setAttribute("data-theme", isDark() ? "light" : "dark");
+    syncThemeLabel();
+  });
+  /* Until a choice is made the page follows the OS, so the label has to
+     follow it too. After a click, data-theme wins and this stops mattering. */
+  function onSystemTheme(){ if (!root.getAttribute("data-theme")) syncThemeLabel(); }
+  if (themeMedia.addEventListener) themeMedia.addEventListener("change", onSystemTheme);
+  else if (themeMedia.addListener) themeMedia.addListener(onSystemTheme);
+  syncThemeLabel();
+
+  /* ---------------- hash routing ---------------- */
+  var ROUTES = {
+    "#/":"p-home", "#/start":"p-start", "#/guide":"p-guide",
+    "#/api":"p-api", "#/design":"p-design", "#/faq":"p-faq"
+  };
+
+  function route(){
+    var hash = location.hash || "#/";
+    /* in-page anchors (#g-lease) must not switch the page */
+    if (!ROUTES[hash] && hash.indexOf("#/") !== 0) return;
+    var id = ROUTES[hash] || "p-home";
+    var pages = document.querySelectorAll(".page");
+    for (var i = 0; i < pages.length; i++) pages[i].classList.toggle("is-on", pages[i].id === id);
+    var links = document.querySelectorAll(".tabs a");
+    for (var j = 0; j < links.length; j++){
+      if (links[j].getAttribute("href") === hash) links[j].setAttribute("aria-current","page");
+      else links[j].removeAttribute("aria-current");
+    }
+    if (!ROUTES[hash]) return;
+    window.scrollTo(0,0);
+    reveal();
+  }
+  window.addEventListener("hashchange", route);
+
+  /* ---------------- scroll reveal ---------------- */
+  var io = null;
+  if ("IntersectionObserver" in window){
+    io = new IntersectionObserver(function(entries){
+      for (var i = 0; i < entries.length; i++){
+        if (entries[i].isIntersecting){
+          entries[i].target.classList.add("in");
+          io.unobserve(entries[i].target);
+        }
+      }
+    }, {rootMargin:"0px 0px -12% 0px"});
+  }
+  function reveal(){
+    var items = document.querySelectorAll(".page.is-on .rv:not(.in)");
+    for (var i = 0; i < items.length; i++){
+      if (io) io.observe(items[i]); else items[i].classList.add("in");
+    }
+  }
+
+  route();
+  reveal();
+
+  /* ---------------- the hero log ----------------
+     A scripted loop of the thing the whole project is about: records append,
+     a write is interrupted mid-record, recovery truncates back to the last
+     clean one. Offsets are real arithmetic over the record sizes below. */
+
+  var box = document.getElementById("hero-log");
+  var msg = document.getElementById("hero-msg");
+  var dot = document.getElementById("hero-dot");
+  var stateEl = document.getElementById("hero-state");
+  if (!box) return;
+
+  var SCRIPT = [
+    ["ENQUEUE", '{"id":"a81eff54","payload":{"to":"ada@example.com"}}',    297],
+    ["ENQUEUE", '{"id":"c0a170fa","payload":{"to":"grace@example.com"}}',  301],
+    ["ENQUEUE", '{"id":"5f63d103","payload":{"to":"alan@example.com"}}',   300],
+    ["LEASE",   '{"id":"a81eff54","deadline":1785840962,"attempts":1}',    144],
+    ["LEASE",   '{"id":"c0a170fa","deadline":1785840962,"attempts":1}',    144],
+    ["ACK",     '{"id":"a81eff54"}',                                        76],
+    ["NACK",    '{"id":"c0a170fa","available_at":1785840964}',             118],
+    ["ENQUEUE", '{"id":"9b2c71de","payload":{"to":"edsger@example.com"}}', 302],
+    ["LEASE",   '{"id":"5f63d103","deadline":1785840992,"attempts":1}',    144],
+    ["ACK",     '{"id":"5f63d103"}',                                        76]
+  ];
+
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var rows = [], offset = 16, i = 0, phase = "append";
+
+  function render(fresh){
+    box.textContent = "";
+    var start = Math.max(0, rows.length - 11);
+    for (var k = start; k < rows.length; k++){
+      var r = rows[k];
+      var el = document.createElement("div");
+      el.className = "lrow" + (r.torn ? " lrow--torn" : "")
+        + (fresh && k === rows.length - 1 ? " lrow--new" : "");
+      var a = document.createElement("span"); a.className = "lrow__off";  a.textContent = "@" + r.off;
+      var b = document.createElement("span"); b.className = "lrow__type t-" + r.type; b.textContent = r.type;
+      var c = document.createElement("span"); c.className = "lrow__body"; c.textContent = r.body;
+      el.appendChild(a); el.appendChild(b); el.appendChild(c);
+      box.appendChild(el);
+    }
+  }
+  function say(text, bad){
+    msg.textContent = text;
+    dot.className = "dot" + (bad ? " dot--bad" : "");
+  }
+
+  function step(){
+    if (phase === "append"){
+      var rec = SCRIPT[i];
+      rows.push({off:offset, type:rec[0], body:rec[1]});
+      offset += rec[2];
+      i++;
+      render(true);
+      if (i === SCRIPT.length){
+        phase = "tear";
+        say("Every record is length-prefixed and CRC-checksummed.", false);
+        return 1600;
+      }
+      return 620;
+    }
+    if (phase === "tear"){
+      rows.push({off:offset, type:"ENQUEUE", body:'{"id":"7f0e21a…   ── process killed mid-write', torn:true});
+      render(true);
+      stateEl.textContent = "kill -9";
+      say("Torn tail: 41 of 299 bytes written. The checksum will not match.", true);
+      phase = "recover";
+      return 2400;
+    }
+    if (phase === "recover"){
+      rows.pop();
+      render(false);
+      stateEl.textContent = "recovered";
+      say("Repaired: truncated 41 bytes. Every acked job intact, nothing lost.", false);
+      phase = "reset";
+      return 2800;
+    }
+    rows = []; offset = 16; i = 0; phase = "append";
+    stateEl.textContent = "appending";
+    render(false);
+    return 700;
+  }
+
+  if (reduce){
+    for (var n = 0; n < SCRIPT.length; n++){
+      rows.push({off:offset, type:SCRIPT[n][0], body:SCRIPT[n][1]});
+      offset += SCRIPT[n][2];
+    }
+    render(false);
+  } else {
+    (function tick(){ setTimeout(function(){ tick(); }, step()); })();
+  }
+})();
+</script>
+</body>
+</html>

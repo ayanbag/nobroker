@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1600" width="2400" height="1600" role="img" aria-label="nobroker — a durable job queue with no broker, no server and no dependencies.">
+  <title>nobroker — blog poster</title>
+
+  <rect width="2400" height="1600" fill="#12160F"/>
+
+  <!-- mark -->
+  <g transform="translate(1072,250) scale(0.5)">
+    <rect width="512" height="512" rx="118" fill="#E4784F"/>
+    <g fill="#12160F">
+      <rect x="112" y="150" width="288" height="44" rx="22"/>
+      <rect x="112" y="234" width="288" height="44" rx="22"/>
+      <rect x="112" y="318" width="150" height="44" rx="22"/>
+      <rect x="286" y="318" width="44"  height="44" rx="22" opacity="0.42"/>
+    </g>
+  </g>
+
+  <text x="1200" y="700" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="164" font-weight="700" letter-spacing="-8" fill="#F1F3EC">nobroker<tspan fill="#E4784F">/</tspan></text>
+
+  <g text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+     font-size="76" font-weight="700" letter-spacing="-2" fill="#E4784F">
+    <text x="1200" y="880">a durable job queue</text>
+    <text x="1200" y="982">with nobody</text>
+    <text x="1200" y="1084">in the middle</text>
+  </g>
+
+  <text x="1200" y="1214" text-anchor="middle"
+        font-family="'Iowan Old Style', Palatino, Georgia, serif"
+        font-size="44" fill="#8A968A">no Redis · no RabbitMQ · no server · no dependencies</text>
+
+  <line x1="860" y1="1300" x2="1540" y2="1300" stroke="#2A322A" stroke-width="2"/>
+
+  <text x="1200" y="1372" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="34" letter-spacing="2" fill="#5E6A5F">survives kill -9 · at-least-once · python 3.11+</text>
+
+  <!-- the torn tail, spelled out along the base -->
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace" font-size="27" fill="#3C463C">
+    <text x="1200" y="1470" text-anchor="middle">@16 ENQUEUE · @313 LEASE · @457 ACK · @533 ENQUEUE · @830 <tspan fill="#E4784F">TORN</tspan></text>
+  </g>
+</svg>

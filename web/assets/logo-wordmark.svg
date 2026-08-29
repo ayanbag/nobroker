@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 200" width="900" height="200" role="img" aria-label="nobroker — the job queue with nobody in the middle">
+  <title>nobroker</title>
+  <g transform="translate(20,26) scale(0.2871)">
+    <rect width="512" height="512" rx="118" fill="#B4471F"/>
+    <g fill="#14180F">
+      <rect x="112" y="150" width="288" height="44" rx="22"/>
+      <rect x="112" y="234" width="288" height="44" rx="22"/>
+      <rect x="112" y="318" width="150" height="44" rx="22"/>
+      <rect x="286" y="318" width="44"  height="44" rx="22" opacity="0.42"/>
+    </g>
+  </g>
+  <text x="190" y="96"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="66" font-weight="700" letter-spacing="-3" fill="#151C18">nobroker<tspan fill="#B4471F">/</tspan></text>
+  <text x="192" y="136"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="21" letter-spacing="3.4" fill="#7C877D">DURABLE · BROKER-LESS · 0 DEPS</text>
+</svg>

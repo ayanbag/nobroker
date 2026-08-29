@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2160 1215" width="2160" height="1215" role="img" aria-label="nobroker — the job queue Python never needed a server for. A comparison of running a broker versus one append-only file.">
+  <title>nobroker — blog thumbnail</title>
+
+  <rect width="2160" height="1215" fill="#F1F3EC"/>
+
+  <!-- mark -->
+  <g transform="translate(1002,150) scale(0.305)">
+    <rect width="512" height="512" rx="118" fill="#14180F"/>
+    <g fill="#E4784F">
+      <rect x="112" y="150" width="288" height="44" rx="22"/>
+      <rect x="112" y="234" width="288" height="44" rx="22"/>
+      <rect x="112" y="318" width="150" height="44" rx="22"/>
+      <rect x="286" y="318" width="44"  height="44" rx="22" opacity="0.42"/>
+    </g>
+  </g>
+
+  <text x="1080" y="440" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="110" font-weight="700" letter-spacing="-5" fill="#151C18">nobroker<tspan fill="#B4471F">/</tspan></text>
+
+  <text x="1080" y="512" text-anchor="middle"
+        font-family="'Iowan Old Style', Palatino, Georgia, serif"
+        font-size="46" fill="#4A5449">The durable job queue Python never needed</text>
+  <text x="1080" y="566" text-anchor="middle"
+        font-family="'Iowan Old Style', Palatino, Georgia, serif"
+        font-size="46" fill="#4A5449">a server for — one file, zero dependencies</text>
+
+  <!-- three comparison cards -->
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace">
+
+    <!-- with a broker -->
+    <rect x="176" y="660" width="560" height="430" rx="18" fill="#14180F"/>
+    <text x="228" y="726" font-size="27" font-weight="700" letter-spacing="3" fill="#8A968A">WITH A BROKER</text>
+    <g fill="#D9DED5" font-size="31">
+      <text x="228" y="806">celery</text>
+      <text x="228" y="866">kombu, billiard, vine</text>
+      <text x="228" y="926">redis-server</text>
+      <text x="228" y="986">supervisord</text>
+    </g>
+    <rect x="228" y="1018" width="330" height="6" rx="3" fill="#E4784F" opacity="0.75"/>
+    <text x="228" y="1062" font-size="27" fill="#E4784F">~40 MB + a process</text>
+
+    <!-- nobroker -->
+    <rect x="800" y="660" width="560" height="430" rx="18" fill="#14180F"/>
+    <text x="852" y="726" font-size="27" font-weight="700" letter-spacing="3" fill="#E4784F">NOBROKER</text>
+    <g fill="#D9DED5" font-size="31">
+      <text x="852" y="806">emails.000001.log</text>
+      <text x="852" y="866">emails.current</text>
+      <text x="852" y="926">emails.lock</text>
+      <text x="852" y="986" fill="#5E6A5F">— nothing else —</text>
+    </g>
+    <rect x="852" y="1018" width="110" height="6" rx="3" fill="#63C393"/>
+    <text x="852" y="1062" font-size="27" fill="#63C393">3 files, 0 processes</text>
+
+    <!-- difference -->
+    <rect x="1424" y="660" width="560" height="430" rx="18" fill="#14180F"/>
+    <text x="1476" y="726" font-size="27" font-weight="700" letter-spacing="3" fill="#63C393">DIFFERENCE</text>
+
+    <rect x="1476" y="768" width="240" height="52" rx="26" fill="#63C393" opacity="0.14"/>
+    <text x="1502" y="804" font-size="29" fill="#63C393">− 1 server</text>
+
+    <rect x="1476" y="838" width="240" height="52" rx="26" fill="#63C393" opacity="0.14"/>
+    <text x="1502" y="874" font-size="29" fill="#63C393">− 7 packages</text>
+
+    <rect x="1476" y="908" width="240" height="52" rx="26" fill="#63C393" opacity="0.14"/>
+    <text x="1502" y="944" font-size="29" fill="#63C393">− 40 MB</text>
+
+    <rect x="1476" y="978" width="240" height="52" rx="26" fill="#63C393" opacity="0.14"/>
+    <text x="1502" y="1014" font-size="29" fill="#63C393">± 0 guarantees</text>
+  </g>
+</svg>

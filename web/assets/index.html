@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nobroker — brand assets</title>
+<link rel="icon" href="./logo.svg">
+<style>
+:root{
+  --paper:#F1F3EC;--paper-2:#E8EBE2;--ink:#151C18;--ink-2:#535E55;--ink-3:#7C877D;
+  --rule:#C6CFC2;--oxide:#9E3B18;
+  --mono:ui-monospace,"SFMono-Regular","Cascadia Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{--paper:#0F1310;--paper-2:#161B16;--ink:#E7ECE3;--ink-2:#A0AC9F;--ink-3:#78857A;--rule:#2A322A;--oxide:#E4784F}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--serif);font-size:16px;line-height:1.6}
+.wrap{max-width:1100px;margin:0 auto;padding:48px 28px 90px}
+h1,h2{font-family:var(--mono);letter-spacing:-.03em;margin:0}
+h1{font-size:32px}
+h2{font-size:17px;margin:0 0 4px}
+.lede{color:var(--ink-2);max-width:70ch;margin:12px 0 40px}
+.asset{border:1px solid var(--rule);margin-bottom:38px;background:var(--paper-2)}
+.asset__head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--rule)}
+.asset__meta{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.asset__meta a{color:var(--oxide)}
+.asset__body{padding:18px;display:flex;justify-content:center;background:repeating-conic-gradient(var(--paper) 0 25%, transparent 0 50%) 0 0/22px 22px}
+.asset__body img{max-width:100%;height:auto;display:block;box-shadow:0 1px 0 var(--rule)}
+.note{font-family:var(--mono);font-size:12.5px;color:var(--ink-2);padding:12px 18px;border-top:1px solid var(--rule)}
+.icons{display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+.icons img{display:block}
+code{font-family:var(--mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--rule);padding:.08em .34em;border-radius:3px}
+.back{font-family:var(--mono);font-size:12.5px;color:var(--ink-2);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="../index.html">← back to the site</a>
+  <h1 style="margin-top:22px">Brand assets</h1>
+  <p class="lede">The mark is an append-only log with a torn tail: three stacked records, the last
+  one cut short mid-write with a detached fragment after the gap. Every asset here is SVG, so it
+  scales without a build step and drops straight into a README. Export to PNG only where a platform
+  demands raster.</p>
+
+  <div class="asset">
+    <div class="asset__head">
+      <div><h2>Icon</h2><span class="asset__meta">512 × 512 · favicon, avatar, app tile</span></div>
+      <div class="asset__meta"><a href="./logo.svg">logo.svg</a></div>
+    </div>
+    <div class="asset__body">
+      <div class="icons">
+        <img src="./logo.svg" width="160" height="160" alt="nobroker icon at 160 pixels">
+        <img src="./logo.svg" width="72"  height="72"  alt="nobroker icon at 72 pixels">
+        <img src="./logo.svg" width="40"  height="40"  alt="nobroker icon at 40 pixels">
+        <img src="./logo.svg" width="24"  height="24"  alt="nobroker icon at 24 pixels">
+        <img src="./logo.svg" width="16"  height="16"  alt="nobroker icon at 16 pixels">
+      </div>
+    </div>
+    <div class="note">Legible to 16 px — the torn third bar still reads as "the last one is short".</div>
+  </div>
+
+  <div class="asset">
+    <div class="asset__head">
+      <div><h2>Horizontal lockup</h2><span class="asset__meta">900 × 200 · docs headers, slide corners</span></div>
+      <div class="asset__meta"><a href="./logo-wordmark.svg">logo-wordmark.svg</a></div>
+    </div>
+    <div class="asset__body"><img src="./logo-wordmark.svg" alt="nobroker wordmark"></div>
+  </div>
+
+  <div class="asset">
+    <div class="asset__head">
+      <div><h2>1 · GitHub README banner</h2><span class="asset__meta">2400 × 1000 · dark</span></div>
+      <div class="asset__meta"><a href="./banner-github.svg">banner-github.svg</a></div>
+    </div>
+    <div class="asset__body"><img src="./banner-github.svg" alt="nobroker GitHub banner"></div>
+    <div class="note">Already wired into the README: <code>&lt;img src="web/assets/banner-github.svg"&gt;</code>. GitHub renders SVG in READMEs, so no PNG export is needed.</div>
+  </div>
+
+  <div class="asset">
+    <div class="asset__head">
+      <div><h2>2 · Blog thumbnail</h2><span class="asset__meta">2160 × 1215 · 16:9 · light</span></div>
+      <div class="asset__meta"><a href="./banner-thumbnail.svg">banner-thumbnail.svg</a></div>
+    </div>
+    <div class="asset__body"><img src="./banner-thumbnail.svg" alt="nobroker blog thumbnail"></div>
+    <div class="note">16:9 for card previews and social embeds. Most blog platforms want a raster upload — open the SVG and export at 2160 × 1215.</div>
+  </div>
+
+  <div class="asset">
+    <div class="asset__head">
+      <div><h2>3 · Blog poster</h2><span class="asset__meta">2400 × 1600 · 3:2 · dark</span></div>
+      <div class="asset__meta"><a href="./banner-poster.svg">banner-poster.svg</a></div>
+    </div>
+    <div class="asset__body"><img src="./banner-poster.svg" alt="nobroker blog poster"></div>
+  </div>
+
+  <div class="asset">
+    <div class="asset__head"><div><h2>Palette</h2><span class="asset__meta">ledger neutrals, biased green · three semantic states</span></div></div>
+    <div class="note" style="border-top:0;line-height:2">
+      <code>#12160F</code> ink ground &nbsp;·&nbsp;
+      <code>#F1F3EC</code> ledger paper &nbsp;·&nbsp;
+      <code>#C6CFC2</code> rule &nbsp;·&nbsp;
+      <code>#B4471F</code> / <code>#E4784F</code> oxide — damage, torn, dead &nbsp;·&nbsp;
+      <code>#2C6A4E</code> / <code>#63C393</code> verified — durable, acked &nbsp;·&nbsp;
+      <code>#8A6A1F</code> / <code>#D5AB4E</code> brass — leased, in flight
+    </div>
+  </div>
+</div>
+</body>
+</html>

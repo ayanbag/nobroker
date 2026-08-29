@@ -1,0 +1,53 @@
+name: site
+
+# Publishes web/ to GitHub Pages: the docs site plus the interactive playground.
+# The site is plain static HTML with no build step -- no npm, no bundler, no
+# generator -- so this workflow only has to copy a directory.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity-check the site
+        run: |
+          test -f web/index.html
+          test -f web/playground.html
+          test -f web/assets/logo.svg
+          # Nothing is fetched at runtime, so a stray external URL would be a
+          # broken page rather than a slow one.
+          if grep -rInE '(src|href)="https?://' web/ ; then
+            echo "::error::web/ must stay self-contained - no external assets"
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

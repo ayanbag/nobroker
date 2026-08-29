@@ -1,0 +1,45 @@
+nobroker -- third-party dependency proof
+============================================================
+python:   3.11.9 (win32)
+scanned:  src/**/*.py, tests/**/*.py, tools/**/*.py, examples/**/*.py
+method:   ast.parse + sys.stdlib_module_names (no imports executed)
+
+standard library modules imported (31):
+  __future__           examples/demo.py, examples/handlers.py, examples/video_demo.py ...
+  argparse             examples/video_demo.py, src/nobroker/cli.py, tools/check_deps.py
+  ast                  tools/check_deps.py
+  contextlib           src/nobroker/queue.py, tests/test_cli.py
+  ctypes               src/nobroker/logfile.py
+  dataclasses          src/nobroker/backoff.py, src/nobroker/bench.py, src/nobroker/codec.py ...
+  enum                 src/nobroker/codec.py, src/nobroker/job.py
+  fcntl                src/nobroker/lock.py
+  heapq                src/nobroker/index.py
+  importlib            src/nobroker/cli.py
+  io                   tests/test_cli.py
+  json                 src/nobroker/cli.py, src/nobroker/codec.py, tests/test_cli.py ...
+  logging              src/nobroker/cli.py, src/nobroker/worker.py, tests/test_cli.py ...
+  msvcrt               src/nobroker/lock.py, src/nobroker/logfile.py
+  multiprocessing      examples/video_demo.py, tests/support.py, tests/test_concurrency.py
+  os                   examples/demo.py, examples/video_demo.py, src/nobroker/lock.py ...
+  pathlib              examples/demo.py, examples/video_demo.py, src/nobroker/bench.py ...
+  random               examples/demo.py, examples/handlers.py, src/nobroker/backoff.py ...
+  signal               src/nobroker/worker.py
+  struct               src/nobroker/codec.py
+  subprocess           tools/build_pyz.py
+  sys                  examples/demo.py, examples/video_demo.py, src/__main__.py ...
+  tempfile             examples/demo.py, examples/video_demo.py, src/nobroker/bench.py ...
+  threading            src/nobroker/queue.py, src/nobroker/worker.py, tests/test_concurrency.py ...
+  time                 examples/handlers.py, examples/video_demo.py, src/nobroker/bench.py ...
+  types                src/nobroker/lock.py
+  typing               examples/handlers.py, src/nobroker/bench.py, src/nobroker/cli.py ...
+  unittest             tests/support.py, tests/test_backoff.py, tests/test_cli.py ...
+  uuid                 src/nobroker/queue.py
+  zipapp               tools/build_pyz.py
+  zlib                 src/nobroker/codec.py, tests/test_codec.py
+
+first-party modules (1):
+  nobroker
+
+third-party dependencies: 0
+
+VERDICT: nobroker runs on the Python standard library alone.

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="nobroker">
+  <title>nobroker</title>
+  <desc>An append-only log: three stacked records, the last one torn mid-write with a detached fragment after the gap.</desc>
+  <rect width="512" height="512" rx="118" fill="#B4471F"/>
+  <g fill="#14180F">
+    <rect x="112" y="150" width="288" height="44" rx="22"/>
+    <rect x="112" y="234" width="288" height="44" rx="22"/>
+    <rect x="112" y="318" width="150" height="44" rx="22"/>
+    <rect x="286" y="318" width="44"  height="44" rx="22" opacity="0.42"/>
+  </g>
+</svg>
