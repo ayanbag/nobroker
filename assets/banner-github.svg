@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 1000" width="2400" height="1000" role="img" aria-label="nobroker — a durable job queue with nobody in the middle. Zero dependencies, 122 tests, one file on disk, at-least-once delivery.">
+  <title>nobroker</title>
+
+  <rect width="2400" height="1000" fill="#12160F"/>
+
+  <!-- mark -->
+  <g transform="translate(1104,140) scale(0.375)">
+    <rect width="512" height="512" rx="118" fill="#E4784F"/>
+    <g fill="#12160F">
+      <rect x="112" y="150" width="288" height="44" rx="22"/>
+      <rect x="112" y="234" width="288" height="44" rx="22"/>
+      <rect x="112" y="318" width="150" height="44" rx="22"/>
+      <rect x="286" y="318" width="44"  height="44" rx="22" opacity="0.42"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text x="1200" y="510" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="150" font-weight="700" letter-spacing="-7" fill="#F1F3EC">nobroker<tspan fill="#E4784F">/</tspan></text>
+
+  <text x="1200" y="586" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="47" font-weight="700" letter-spacing="-1" fill="#E4784F">the job queue with nobody in the middle</text>
+
+  <text x="1200" y="648" text-anchor="middle"
+        font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="34" letter-spacing="0.5" fill="#8A968A">durable · crash-safe · multi-process · python 3.11+</text>
+
+  <line x1="600" y1="726" x2="1800" y2="726" stroke="#2A322A" stroke-width="2"/>
+
+  <!-- stats -->
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, 'DejaVu Sans Mono', monospace" text-anchor="middle">
+    <text x="720"  y="836" font-size="60" font-weight="700" fill="#63C393">0</text>
+    <text x="720"  y="888" font-size="30" fill="#8A968A">dependencies</text>
+
+    <text x="1040" y="836" font-size="60" font-weight="700" fill="#63C393">122</text>
+    <text x="1040" y="888" font-size="30" fill="#8A968A">tests passing</text>
+
+    <text x="1360" y="836" font-size="60" font-weight="700" fill="#63C393">1</text>
+    <text x="1360" y="888" font-size="30" fill="#8A968A">file on disk</text>
+
+    <text x="1680" y="836" font-size="60" font-weight="700" fill="#63C393">0</text>
+    <text x="1680" y="888" font-size="30" fill="#8A968A">servers to run</text>
+  </g>
+</svg>
