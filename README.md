@@ -31,7 +31,7 @@ and a file.
 The name is the thesis. Every other job queue makes you run a broker. This one
 doesn't.
 
-> Built for the [Zero Dependency Hackathon](https://zerodepshack.com) — **Track D, Data & Storage**.
+> Built for the [Zero Dependency Hackathon](https://zerodepshack.com) — **Track D, Data & Storage**. ***(Ranked 18th out of 295 projects)***
 
 ---
 
